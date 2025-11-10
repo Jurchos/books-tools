@@ -1,0 +1,3 @@
+[submodule "src/ext/scripts"]
+	path = src/ext/scripts
+	url = git@github.com:heimdallr/scripts.git
