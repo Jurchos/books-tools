@@ -19,5 +19,6 @@ foreach(dir ${sources_list})
 	endif()
 endforeach()
 
+set(COMPANY_NAME "HomeCompa")
 configure_file(${BUILDSCRIPTS_ROOT}/helpers/git_hash.h.in ${CMAKE_CURRENT_BINARY_DIR}/config/git_hash.h @ONLY)
 configure_file(${BUILDSCRIPTS_ROOT}/helpers/version.h.in ${CMAKE_CURRENT_BINARY_DIR}/config/version.h @ONLY)
