@@ -1104,8 +1104,9 @@ private:
 			if (auto encoded = encode(m_settings.cover, cover.fileName, cover.image, cover.body); encoded.size() < cover.body.size())
 				cover.body = std::move(encoded);
 
-		decltype(images) encodedImages;
 		if (m_settings.image.save)
+		{
+			decltype(images) encodedImages;
 			for (auto& image : images)
 			{
 				assert(!image.body.isEmpty());
@@ -1114,10 +1115,12 @@ private:
 				else
 					encodedImages.emplace(ImageItem { .fileName = image.fileName, .body = image.body, .dateTime = image.dateTime, .hash = image.hash });
 			}
+			images = std::move(encodedImages);
+		}
 
 		cover.image = {};
 
-		m_uniqueFileStorage.SetImages(hash, inputFilePath, std::move(cover), std::move(encodedImages));
+		m_uniqueFileStorage.SetImages(hash, inputFilePath, std::move(cover), std::move(images));
 
 		return bodyOutput;
 	}
