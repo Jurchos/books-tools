@@ -19,7 +19,8 @@ namespace HomeCompa::FliParser::Database
 {
 
 #define LIBRARY_ITEMS_X_MACRO \
-	LIBRARY_ITEM(Flibusta)
+	LIBRARY_ITEM(Flibusta)    \
+	LIBRARY_ITEM(RusEc)
 
 #define LIBRARY_ITEM(NAME) std::unique_ptr<IDatabase> Create##NAME##Database();
 LIBRARY_ITEMS_X_MACRO
