@@ -390,7 +390,7 @@ public:
 		{
 			if (it->second.first.file == fileName)
 			{
-				it->second.first.cover = std::move(cover);
+				it->second.first.cover  = std::move(cover);
 				it->second.first.images = std::move(images);
 				return;
 			}
@@ -954,6 +954,8 @@ private:
 		QBuffer    output(&bodyOutput);
 		output.open(QIODevice::WriteOnly);
 
+		static constexpr const char* passThruBinTypes[] = { "zip", "rar", "txt" };
+
 		const auto encode = [this](const ImageSettings& settings, const QString& fileName, const QImage& image, const QByteArray& body) -> QByteArray {
 			if (fileName.isEmpty())
 				return {};
@@ -987,8 +989,7 @@ private:
 				m_imageStatistics.emplace_back(m_folder, completeFileName, std::move(name), fail, isCover, body.size(), width, height, pixelSchema, QString::fromUtf8(m_hash.result().toHex()));
 			});
 
-			const QFileInfo              imageFileInfo(name);
-			static constexpr const char* passThruBinTypes[] = { "zip", "rar", "txt" };
+			const QFileInfo imageFileInfo(name);
 			if (const auto it = std::ranges::find_if(
 					passThruBinTypes,
 					[ext = imageFileInfo.suffix().toLower()](const char* type) {
@@ -1061,7 +1062,7 @@ private:
 
 			if (!settings.save)
 			{
-				imageItem.body = {};
+				imageItem.body  = {};
 				imageItem.image = {};
 			}
 
@@ -1110,10 +1111,16 @@ private:
 			for (auto& image : images)
 			{
 				assert(!image.body.isEmpty());
-				if (auto encoded = encode(m_settings.image, image.fileName, image.image, image.body); !encoded.isEmpty() && encoded.size() < image.body.size())
-					encodedImages.emplace(ImageItem { .fileName = image.fileName, .body = std::move(encoded), .dateTime = image.dateTime, .hash = image.hash });
-				else
-					encodedImages.emplace(ImageItem { .fileName = image.fileName, .body = image.body, .dateTime = image.dateTime, .hash = image.hash });
+				if (std::ranges::none_of(passThruBinTypes, [ext = QFileInfo(image.fileName).suffix().toLower()](const char* item) {
+						return ext == item;
+					}))
+					if (auto encoded = encode(m_settings.image, image.fileName, image.image, image.body); !encoded.isEmpty() && encoded.size() < image.body.size())
+					{
+						encodedImages.emplace(ImageItem { .fileName = image.fileName, .body = std::move(encoded), .dateTime = image.dateTime, .hash = image.hash });
+						continue;
+					}
+
+				encodedImages.emplace(ImageItem { .fileName = image.fileName, .body = image.body, .dateTime = image.dateTime, .hash = image.hash });
 			}
 			images = std::move(encodedImages);
 		}
