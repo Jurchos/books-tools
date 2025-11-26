@@ -305,6 +305,10 @@ void CreateInpx(Settings& settings, InpData& inpData, const QString& sourceLib)
 
 				book->sourceLib = sourceLib;
 
+				QFileInfo fileInfo(bookFile);
+				book->file = fileInfo.completeBaseName();
+				book->ext  = fileInfo.suffix();
+
 				file << *book;
 
 				maxTime = std::max(maxTime, zip.GetFileTime(bookFile));
