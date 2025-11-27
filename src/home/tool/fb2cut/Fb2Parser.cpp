@@ -472,85 +472,6 @@ private:
 	Section*                                m_currentSection { &m_section };
 };
 
-class HashParserImpl final : public Util::SaxParser
-{
-	static constexpr auto BOOK       = "books/book";
-	static constexpr auto COVER      = "books/book/cover";
-	static constexpr auto IMAGE      = "books/book/image";
-	static constexpr auto DUPLICATES = "books/book/duplicates";
-
-public:
-	HashParserImpl(QIODevice& input, HashParser::Callback callback)
-		: SaxParser(input, 512)
-		, m_callback { std::move(callback) }
-	{
-		Parse();
-	}
-
-private: // Util::SaxParser
-	bool OnStartElement(const QString& /*name*/, const QString& path, const Util::XmlAttributes& attributes) override
-	{
-		if (path == BOOK)
-		{
-#define HASH_PARSER_CALLBACK_ITEM(NAME) m_##NAME = attributes.GetAttribute(#NAME);
-			HASH_PARSER_CALLBACK_ITEMS_X_MACRO
-#undef HASH_PARSER_CALLBACK_ITEM
-		}
-		else if (path == DUPLICATES)
-		{
-#define HASH_PARSER_CALLBACK_ITEM(NAME) m_##NAME.clear();
-			HASH_PARSER_CALLBACK_ITEMS_X_MACRO
-#undef HASH_PARSER_CALLBACK_ITEM
-			m_cover.clear();
-			m_images.clear();
-		}
-
-		return true;
-	}
-
-	bool OnEndElement(const QString& /*name*/, const QString& path) override
-	{
-		if (path == BOOK)
-		{
-			if (!m_id.isEmpty())
-				m_callback(
-#define HASH_PARSER_CALLBACK_ITEM(NAME) std::move(m_##NAME),
-					HASH_PARSER_CALLBACK_ITEMS_X_MACRO
-#undef HASH_PARSER_CALLBACK_ITEM
-						std::move(m_cover),
-					std::move(m_images)
-				);
-
-#define HASH_PARSER_CALLBACK_ITEM(NAME) m_##NAME = {};
-			HASH_PARSER_CALLBACK_ITEMS_X_MACRO
-#undef HASH_PARSER_CALLBACK_ITEM
-
-			m_cover  = {};
-			m_images = {};
-		}
-
-		return true;
-	}
-
-	bool OnCharacters(const QString& path, const QString& value) override
-	{
-		if (path == COVER)
-			m_cover = value;
-		else if (path == IMAGE)
-			m_images << value;
-		return true;
-	}
-
-private:
-	HashParser::Callback m_callback;
-#define HASH_PARSER_CALLBACK_ITEM(NAME) QString m_##NAME;
-	HASH_PARSER_CALLBACK_ITEMS_X_MACRO
-#undef HASH_PARSER_CALLBACK_ITEM
-
-	QString     m_cover;
-	QStringList m_images;
-};
-
 } // namespace
 
 QString Fb2EncodingParser::GetEncoding(QIODevice& input)
@@ -580,9 +501,4 @@ Fb2Parser::ParseResult Fb2Parser::Parse(QString fileName, QIODevice& input, QIOD
 {
 	Fb2ParserImpl parser(std::move(fileName), input, output, replaceId);
 	return parser.GetResult();
-}
-
-void HashParser::Parse(QIODevice& input, Callback callback)
-{
-	[[maybe_unused]] const HashParserImpl parser(input, std::move(callback));
 }

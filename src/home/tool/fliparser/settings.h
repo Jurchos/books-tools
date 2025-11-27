@@ -7,10 +7,14 @@
 
 #include <QString>
 
+namespace HomeCompa
+{
+struct Book;
+}
+
 namespace HomeCompa::FliParser
 {
 
-struct Book;
 using FileToFolder = std::unordered_map<QString, QStringList>;
 
 struct Settings

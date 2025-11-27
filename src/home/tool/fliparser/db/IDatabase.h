@@ -2,8 +2,6 @@
 
 #include "fnd/algorithm.h"
 
-#include "book.h"
-
 namespace HomeCompa::DB
 {
 class IDatabase;

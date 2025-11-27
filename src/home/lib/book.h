@@ -8,7 +8,11 @@
 
 #include <QString>
 
-namespace HomeCompa::FliParser
+#include "export/lib.h"
+
+class QIODevice;
+
+namespace HomeCompa
 {
 
 struct Series
@@ -49,9 +53,9 @@ struct Book
 	QString      id;
 	Section::Ptr section;
 
-	static Book fromString(const QString& str);
+	LIB_EXPORT static Book fromString(const QString& str);
 };
 
-QByteArray& operator<<(QByteArray& bytes, const Book& book);
+LIB_EXPORT QByteArray& operator<<(QByteArray& bytes, const Book& book);
 
 } // namespace HomeCompa::FliParser

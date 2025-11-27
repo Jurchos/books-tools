@@ -21,6 +21,7 @@
 
 #include "db/Factory.h"
 #include "db/IDatabase.h"
+#include "lib/book.h"
 #include "logging/LogAppender.h"
 #include "logging/init.h"
 #include "util/Fb2InpxParser.h"
@@ -32,7 +33,6 @@
 #include "util/xml/XmlAttributes.h"
 
 #include "Constant.h"
-#include "book.h"
 #include "log.h"
 #include "settings.h"
 #include "util.h"
@@ -56,6 +56,8 @@ constexpr auto HASH                     = "hash";
 constexpr auto LIBRARY                  = "library";
 
 using InpData = std::unordered_map<QString, std::unique_ptr<Book>, Util::CaseInsensitiveHash<QString>>;
+
+constexpr auto APP_ID = "fliparser";
 
 class HashParser final : public Util::SaxParser
 {
@@ -132,8 +134,6 @@ private:
 	Section::Ptr m_section { std::make_unique<Section>() };
 	Section*     m_currentSection { m_section.get() };
 };
-
-constexpr auto APP_ID = "fliparser";
 
 struct FileInfo
 {
@@ -698,7 +698,7 @@ void ReadHash(Settings& settings, InpData& inpData)
 
 		PLOGI << "reading " << entryPath;
 
-		HashParser parser(stream, [&](QString file, QString duplicate, QString id, Section::Ptr section) {
+		const HashParser parser(stream, [&](QString file, QString duplicate, QString id, Section::Ptr section) {
 			sections.try_emplace(file, std::make_pair(std::move(id), std::move(section)));
 
 			auto it = [&] {

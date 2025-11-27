@@ -1,10 +1,11 @@
 #include "book.h"
 
+#include <ranges>
+
 #include <QStringList>
 
 #include "util/language.h"
 
-using namespace HomeCompa::FliParser;
 using namespace HomeCompa;
 
 Book Book::fromString(const QString& str)
@@ -34,7 +35,7 @@ Book Book::fromString(const QString& str)
 	};
 }
 
-namespace HomeCompa::FliParser
+namespace HomeCompa
 {
 
 QByteArray& operator<<(QByteArray& bytes, const Book& book)
@@ -86,4 +87,4 @@ QByteArray& operator<<(QByteArray& bytes, const Book& book)
 	return bytes;
 }
 
-}
+} // namespace HomeCompa::FliParser

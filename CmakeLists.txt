@@ -41,6 +41,7 @@ find_package(7zip REQUIRED)
 find_package(ICU REQUIRED)
 find_package(libjxl REQUIRED)
 
+include_directories(${CMAKE_CURRENT_LIST_DIR}/src/home)
 include_directories(${CMAKE_CURRENT_LIST_DIR}/src/home/common)
 
 set(FOUNDATION_ROOT ${CMAKE_SOURCE_DIR}/src/ext/foundation)
@@ -67,5 +68,5 @@ add_compile_definitions(HYPODERMIC_OVERRIDE_CONSTRUCTOR_ARGUMENT_COUNT=32)
 include_directories("src/ext/Hypodermic")
 
 include("src/ext/sqlite.cmake")
-include("src/ext/MyHomeLib.cmake")
+include("src/home/lib/lib.cmake")
 include("src/home/tool/tool.cmake")
