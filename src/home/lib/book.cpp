@@ -15,7 +15,7 @@ Book Book::fromString(const QString& str)
 
 	//"AUTHOR;GENRE;TITLE;SERIES;SERNO;FILE;SIZE;LIBID;DEL;EXT;DATE;LANG;LIBRATE;KEYWORDS;YEAR;"
 	auto l = str.split('\04');
-	assert(l.size() == 15);
+	assert(l.size() >= 15);
 	return Book {
 		.author    = std::move(l[0]),
 		.genre     = std::move(l[1]),

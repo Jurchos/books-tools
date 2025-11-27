@@ -40,7 +40,9 @@ namespace
 constexpr auto APP_ID = "flimerger";
 
 constexpr auto ARCHIVE_WILDCARD_OPTION_NAME = "archives";
+constexpr auto COLLECTION_INFO_TEMPLATE     = "collection-info-template";
 constexpr auto FOLDER                       = "folder";
+constexpr auto PATH                         = "path";
 
 struct Archive
 {
@@ -48,16 +50,19 @@ struct Archive
 	QString hashPath;
 };
 
-using Archives = std::vector<Archive>;
+using Archives    = std::vector<Archive>;
+using BookItem    = std::pair<QString, QString>;
+using Replacement = std::unordered_map<BookItem, BookItem, Util::PairHash<QString, QString>>;
 
 struct Settings
 {
 	QDir        outputDir;
 	QStringList arguments;
+	QString     collectionInfoTemplateFile;
 	QString     logFileName;
 };
 
-void ProcessArchive(const Settings& settings, const Archive& archive, UniqueFileStorage& uniqueFileStorage)
+void ProcessArchive(const QDir& outputDir, const Archive& archive, UniqueFileStorage& uniqueFileStorage, Replacement& replacement)
 {
 	QFile file(archive.hashPath);
 	if (!file.open(QIODevice::ReadOnly))
@@ -83,24 +88,31 @@ void ProcessArchive(const Settings& settings, const Archive& archive, UniqueFile
 			auto split    = title.split(' ', Qt::SkipEmptyParts);
 			auto hashText = id;
 
-			if (!uniqueFileStorage.Add(
-					std::move(id),
-					UniqueFile {
-						.title    = { std::make_move_iterator(split.begin()), std::make_move_iterator(split.end()) },
-						.folder   = std::move(folder),
-						.file     = file,
-						.hashText = std::move(hashText),
-						.cover    = { .hash = std::move(cover) },
-						.images   = std::move(imageItems)
+			auto uniqueFile = uniqueFileStorage.Add(
+				std::move(id),
+				UniqueFile {
+					.title    = { std::make_move_iterator(split.begin()), std::make_move_iterator(split.end()) },
+					.folder   = std::move(folder),
+					.file     = file,
+					.hashText = std::move(hashText),
+					.cover    = { .hash = std::move(cover) },
+					.images   = std::move(imageItems)
             }
-				))
-				toRemove.emplace_back(++idBook, fileInfo.fileName(), std::move(file));
+			);
+
+			if (uniqueFile)
+				return;
+
+			const auto& book         = toRemove.emplace_back(++idBook, fileInfo.fileName(), std::move(file));
+			auto&       replacedWith = uniqueFile.error();
+			replacement.try_emplace(std::make_pair(book.folder, book.file), std::make_pair(std::move(replacedWith.first), std::move(replacedWith.second)));
 		}
 	);
 
 	uniqueFileStorage.Save(fileInfo.completeBaseName(), false);
 
-	const auto dstFilePath = settings.outputDir.filePath(fileInfo.fileName());
+	const auto dstFilePath = outputDir.filePath(fileInfo.fileName());
+	QFile::remove(dstFilePath);
 	if (!QFile::copy(fileInfo.filePath(), dstFilePath))
 		throw std::invalid_argument(std::format("Cannot copy {} to {}", fileInfo.filePath(), dstFilePath));
 
@@ -114,11 +126,12 @@ void ProcessArchive(const Settings& settings, const Archive& archive, UniqueFile
 		if (!QFile::exists(imageArchiveFileSrc))
 			continue;
 
-		QDir dstDir(settings.outputDir.filePath(imageFolder));
+		QDir dstDir(outputDir.filePath(imageFolder));
 		if (!dstDir.exists())
 			dstDir.mkpath(".");
 
 		const auto imageArchiveFileDst = dstDir.filePath(fileInfo.completeBaseName() + ".zip");
+		QFile::remove(imageArchiveFileDst);
 		if (!QFile::copy(imageArchiveFileSrc, imageArchiveFileDst))
 			throw std::invalid_argument(std::format("Cannot copy {} to {}", imageArchiveFileSrc, imageArchiveFileDst));
 	}
@@ -129,24 +142,28 @@ void ProcessArchive(const Settings& settings, const Archive& archive, UniqueFile
 	auto allFiles = CollectBookFiles(toRemove, [] {
 		return nullptr;
 	});
-	auto images   = Util::Remove::CollectImageFiles(allFiles, settings.outputDir.absolutePath(), [] {
+	auto images   = Util::Remove::CollectImageFiles(allFiles, outputDir.absolutePath(), [] {
         return nullptr;
     });
 	std::ranges::move(std::move(images), std::inserter(allFiles, allFiles.end()));
-	Util::Remove::RemoveFiles(allFiles, settings.outputDir.absolutePath());
+	Util::Remove::RemoveFiles(allFiles, outputDir.absolutePath());
 }
 
-void ProcessArchives(const Settings& settings, const Archives& archives, UniqueFileStorage& uniqueFileStorage)
+Replacement ProcessArchives(const QDir& outputDir, const Archives& archives, UniqueFileStorage& uniqueFileStorage)
 {
 	PLOGD << "Total file count calculation";
-	const auto totalFileCount = std::accumulate(archives.cbegin(), archives.cend(), size_t {0}, [](const size_t init, const Archive& archive) {
+	const auto totalFileCount = std::accumulate(archives.cbegin(), archives.cend(), size_t { 0 }, [](const size_t init, const Archive& archive) {
 		const Zip zip(archive.filePath);
 		return init + zip.GetFileNameList().size();
 	});
-
 	PLOGI << "Total file count: " << totalFileCount;
+
+	Replacement replacement;
+
 	for (const auto& archive : archives)
-		ProcessArchive(settings, archive, uniqueFileStorage);
+		ProcessArchive(outputDir, archive, uniqueFileStorage, replacement);
+
+	return replacement;
 }
 
 Archives GetArchives(const Settings& settings)
@@ -157,8 +174,6 @@ Archives GetArchives(const Settings& settings)
 
 	for (const auto& argument : settings.arguments)
 	{
-		std::vector<QString> uniqueFilesLocal;
-
 		auto splitted = argument.split(';');
 		if (splitted.size() != 2)
 			throw std::invalid_argument(std::format("{} must be archives_wildcard;hash_folder", argument));
@@ -175,7 +190,7 @@ Archives GetArchives(const Settings& settings)
 				auto       fileName = item.fileName().toLower();
 				const auto result   = !uniqueFiles.contains(fileName);
 				if (result)
-					uniqueFilesLocal.emplace_back(fileName);
+					uniqueFiles.emplace(fileName);
 				return result;
 			}) | std::views::transform([&](const QFileInfo& item) {
 				auto hashPath = hashFolder.filePath(item.completeBaseName()) + ".xml";
@@ -189,11 +204,87 @@ Archives GetArchives(const Settings& settings)
 				return std::make_pair(match.hasMatch() ? match.captured(1).toInt() : 0, std::move(archive));
 			}
 		);
-
-		std::ranges::move(std::move(uniqueFilesLocal), std::inserter(uniqueFiles, uniqueFiles.end()));
 	}
 
 	return std::move(sorted) | std::views::values | std::views::reverse | std::ranges::to<Archives>();
+}
+
+QDateTime ProcessInpx(IZipFileController& zipFiles, const QString& inpxFilePath, const Replacement& replacement)
+{
+	auto maxDateTime = QDateTime::fromSecsSinceEpoch(0);
+	Zip  zip(inpxFilePath);
+	for (const auto& inpFileName : zip.GetFileNameList() | std::views::filter([](const QString& item) {
+									   return item.endsWith(".inp");
+								   }))
+	{
+		QByteArray bytes;
+		const auto zipFile = zip.Read(inpFileName);
+		auto&      stream  = zipFile->GetStream();
+		size_t     counter = 0, total = 0;
+		for (auto byteArray = stream.readLine(); !byteArray.isEmpty(); byteArray = stream.readLine())
+		{
+			++total;
+			const auto book = Book::fromString(QString::fromUtf8(byteArray));
+			if (replacement.contains(std::make_pair(QFileInfo(inpFileName).completeBaseName() + ".7z", book.file + '.' + book.ext)))
+				++counter;
+			else
+				bytes.append(byteArray);
+		}
+
+		if (bytes.isEmpty())
+		{
+			PLOGI << inpFileName << " skipped";
+			continue;
+		}
+
+		PLOGI << inpFileName << " rows removed: " << counter << " of " << total;
+
+		auto inpFileDateTime = zip.GetFileTime(inpFileName);
+		zipFiles.AddFile(inpFileName, std::move(bytes), inpFileDateTime);
+		if (maxDateTime < inpFileDateTime)
+			maxDateTime = std::move(inpFileDateTime);
+	}
+
+	return maxDateTime;
+}
+
+void ProcessInpx(const Settings& settings, const Archives& archives, const Replacement& replacement)
+{
+	auto zipFiles    = Zip::CreateZipFileController();
+	auto maxDateTime = QDateTime::fromSecsSinceEpoch(0);
+
+	std::unordered_set<QString> uniqueFolders;
+	for (const auto& folder : archives | std::views::transform([](const Archive& item) {
+								  return QFileInfo(item.filePath).dir();
+							  }) | std::views::filter([&](const QDir& item) {
+								  auto       path   = item.absolutePath().toLower();
+								  const auto result = !uniqueFolders.contains(path);
+								  if (result)
+									  uniqueFolders.emplace(std::move(path));
+								  return result;
+							  }))
+		for (const auto& inpx : folder.entryList({ "*.inpx" }, QDir::Files))
+			if (auto inpxFileDateTime = ProcessInpx(*zipFiles, folder.absoluteFilePath(inpx), replacement); maxDateTime < inpxFileDateTime)
+				maxDateTime = std::move(inpxFileDateTime);
+
+	const auto outputZipFilePath = settings.outputDir.absoluteFilePath(settings.outputDir.dirName() + ".inpx");
+	QFile::remove(outputZipFilePath);
+	Zip zip(outputZipFilePath, Zip::Format::Zip);
+	zip.SetProperty(Zip::PropertyId::CompressionLevel, QVariant::fromValue(Zip::CompressionLevel::Ultra));
+
+	zipFiles->AddFile(Inpx::STRUCTURE_INFO, Inpx::INP_FIELDS_DESCRIPTION, QDateTime::currentDateTime());
+	zipFiles->AddFile(QString::fromStdWString(Inpx::VERSION_INFO), maxDateTime.toString("yyyyMMdd").toUtf8(), QDateTime::currentDateTime());
+	const auto collectionInfo = [&]() -> QString {
+		if (QFile file(settings.collectionInfoTemplateFile); file.open(QIODevice::ReadOnly))
+			return QString::fromUtf8(file.readAll()).arg(maxDateTime.toString("yyyy-MM-dd"), maxDateTime.toString("yyyyMMdd"));
+
+		return {};
+	}();
+	if (!collectionInfo.isEmpty())
+		zipFiles->AddFile(QString::fromStdWString(Inpx::COLLECTION_INFO), collectionInfo.toUtf8(), QDateTime::currentDateTime());
+
+	PLOGI << "archive inpx files: " << zipFiles->GetCount();
+	zip.Write(std::move(zipFiles));
 }
 
 Settings ProcessCommandLine(const QCoreApplication& app)
@@ -206,14 +297,16 @@ Settings ProcessCommandLine(const QCoreApplication& app)
 	parser.addVersionOption();
 	parser.addPositionalArgument(ARCHIVE_WILDCARD_OPTION_NAME, "Input archives with hashes (required)");
 	parser.addOptions({
-		{ { "o", FOLDER }, "Output folder (required)", FOLDER },
+		{				   { "o", FOLDER }, "Output folder (required)", FOLDER },
+		{ { "i", COLLECTION_INFO_TEMPLATE }, "Collection info template",   PATH },
 	});
 
 	const auto defaultLogPath = QString("%1/%2.%3.log").arg(QStandardPaths::writableLocation(QStandardPaths::TempLocation), COMPANY_ID, APP_ID);
 	const auto logOption      = Log::LoggingInitializer::AddLogFileOption(parser, defaultLogPath);
 	parser.process(app);
 
-	settings.logFileName = parser.isSet(logOption) ? parser.value(logOption) : defaultLogPath;
+	settings.logFileName                = parser.isSet(logOption) ? parser.value(logOption) : defaultLogPath;
+	settings.collectionInfoTemplateFile = parser.value(COLLECTION_INFO_TEMPLATE);
 
 	if (const auto& positionalArguments = parser.positionalArguments(); !positionalArguments.isEmpty())
 	{
@@ -253,11 +346,12 @@ void run(int argc, char* argv[])
 	if (!settings.outputDir.exists() && !settings.outputDir.mkpath("."))
 		throw std::ios_base::failure(std::format("Cannot create folder {}", settings.outputDir.path()));
 
-	const auto        archives = GetArchives(settings);
+	const auto archives = GetArchives(settings);
 
 	UniqueFileStorage uniqueFileStorage(settings.outputDir.absolutePath());
 
-	ProcessArchives(settings, archives, uniqueFileStorage);
+	const auto replacement = ProcessArchives(settings.outputDir, archives, uniqueFileStorage);
+	ProcessInpx(settings, archives, replacement);
 }
 
 } // namespace
