@@ -327,7 +327,7 @@ void CreateInpx(Settings& settings, InpData& inpData, const QString& sourceLib)
 		return {};
 	}();
 
-	zipFileController->AddFile(Inpx::STRUCTURE_INFO, "AUTHOR;GENRE;TITLE;SERIES;SERNO;FILE;SIZE;LIBID;DEL;EXT;DATE;LANG;LIBRATE;KEYWORDS;YEAR;SOURCELIB", QDateTime::currentDateTime());
+	zipFileController->AddFile(Inpx::STRUCTURE_INFO, Inpx::INP_FIELDS_DESCRIPTION, QDateTime::currentDateTime());
 	zipFileController->AddFile(QString::fromStdWString(Inpx::VERSION_INFO), maxTime.toString("yyyyMMdd").toUtf8(), QDateTime::currentDateTime());
 	if (!collectionInfo.isEmpty())
 		zipFileController->AddFile(QString::fromStdWString(Inpx::COLLECTION_INFO), collectionInfo.toUtf8(), QDateTime::currentDateTime());
