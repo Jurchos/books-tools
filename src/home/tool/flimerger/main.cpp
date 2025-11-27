@@ -4,6 +4,7 @@
 
 #include <QCommandLineParser>
 #include <QDir>
+#include <QRegularExpression>
 #include <QStandardPaths>
 
 #include <plog/Appenders/ConsoleAppender.h>
@@ -12,12 +13,13 @@
 #include "lib/book.h"
 #include "logging/LogAppender.h"
 #include "logging/init.h"
+#include "util/BookUtil.h"
 #include "util/LogConsoleFormatter.h"
 #include "util/files.h"
 #include "util/xml/Initializer.h"
 
+#include "Constant.h"
 #include "log.h"
-#include "zip.h"
 
 #include "config/version.h"
 
@@ -40,8 +42,6 @@ constexpr auto APP_ID = "flimerger";
 constexpr auto ARCHIVE_WILDCARD_OPTION_NAME = "archives";
 constexpr auto FOLDER                       = "folder";
 
-using Hash = std::unordered_multimap<QString, Section::Ptr>;
-
 struct Archive
 {
 	QString filePath;
@@ -52,20 +52,110 @@ using Archives = std::vector<Archive>;
 
 struct Settings
 {
-	QDir     outputDir;
-	Archives archives;
-	size_t   totalFileCount { 0 };
-	QString  logFileName;
+	QDir        outputDir;
+	QStringList arguments;
+	QString     logFileName;
 };
 
-void ProcessArchives(const Settings& /*settings*/)
+void ProcessArchive(const Settings& settings, const Archive& archive, UniqueFileStorage& uniqueFileStorage)
 {
+	QFile file(archive.hashPath);
+	if (!file.open(QIODevice::ReadOnly))
+		throw std::invalid_argument(std::format("Cannot read from {}", archive.hashPath));
+
+	Util::Remove::Books toRemove;
+
+	const QFileInfo fileInfo(archive.filePath);
+
+	HashParser::Parse(
+		file,
+		[&, idBook = 0LL](
+#define HASH_PARSER_CALLBACK_ITEM(NAME) QString NAME,
+			HASH_PARSER_CALLBACK_ITEMS_X_MACRO
+#undef HASH_PARSER_CALLBACK_ITEM
+				QString cover,
+			QStringList images
+		) mutable {
+			decltype(UniqueFile::images) imageItems;
+			std::ranges::transform(std::move(images) | std::views::as_rvalue, std::inserter(imageItems, imageItems.end()), [](QString&& hash) {
+				return ImageItem { .hash = std::move(hash) };
+			});
+			auto split    = title.split(' ', Qt::SkipEmptyParts);
+			auto hashText = id;
+
+			if (!uniqueFileStorage.Add(
+					std::move(id),
+					UniqueFile {
+						.title    = { std::make_move_iterator(split.begin()), std::make_move_iterator(split.end()) },
+						.folder   = std::move(folder),
+						.file     = file,
+						.hashText = std::move(hashText),
+						.cover    = { .hash = std::move(cover) },
+						.images   = std::move(imageItems)
+            }
+				))
+				toRemove.emplace_back(++idBook, fileInfo.fileName(), std::move(file));
+		}
+	);
+
+	uniqueFileStorage.Save(fileInfo.completeBaseName(), false);
+
+	const auto dstFilePath = settings.outputDir.filePath(fileInfo.fileName());
+	if (!QFile::copy(fileInfo.filePath(), dstFilePath))
+		throw std::invalid_argument(std::format("Cannot copy {} to {}", fileInfo.filePath(), dstFilePath));
+
+	for (const char* imageFolder : { Global::COVERS, Global::IMAGES })
+	{
+		auto imageDir = fileInfo.dir();
+		if (!imageDir.cd(imageFolder))
+			continue;
+
+		const auto imageArchiveFileSrc = imageDir.absoluteFilePath(fileInfo.completeBaseName()) + ".zip";
+		if (!QFile::exists(imageArchiveFileSrc))
+			continue;
+
+		QDir dstDir(settings.outputDir.filePath(imageFolder));
+		if (!dstDir.exists())
+			dstDir.mkpath(".");
+
+		const auto imageArchiveFileDst = dstDir.filePath(fileInfo.completeBaseName() + ".zip");
+		if (!QFile::copy(imageArchiveFileSrc, imageArchiveFileDst))
+			throw std::invalid_argument(std::format("Cannot copy {} to {}", imageArchiveFileSrc, imageArchiveFileDst));
+	}
+
+	if (toRemove.empty())
+		return;
+
+	auto allFiles = CollectBookFiles(toRemove, [] {
+		return nullptr;
+	});
+	auto images   = Util::Remove::CollectImageFiles(allFiles, settings.outputDir.absolutePath(), [] {
+        return nullptr;
+    });
+	std::ranges::move(std::move(images), std::inserter(allFiles, allFiles.end()));
+	Util::Remove::RemoveFiles(allFiles, settings.outputDir.absolutePath());
 }
 
-void GetArchives(Settings& settings, const QStringList& arguments)
+void ProcessArchives(const Settings& settings, const Archives& archives, UniqueFileStorage& uniqueFileStorage)
 {
+	PLOGD << "Total file count calculation";
+	const auto totalFileCount = std::accumulate(archives.cbegin(), archives.cend(), size_t {0}, [](const size_t init, const Archive& archive) {
+		const Zip zip(archive.filePath);
+		return init + zip.GetFileNameList().size();
+	});
+
+	PLOGI << "Total file count: " << totalFileCount;
+	for (const auto& archive : archives)
+		ProcessArchive(settings, archive, uniqueFileStorage);
+}
+
+Archives GetArchives(const Settings& settings)
+{
+	std::multimap<int, Archive> sorted;
 	std::unordered_set<QString> uniqueFiles;
-	for (const auto& argument : arguments)
+	const QRegularExpression    rx("^.*?fb2.*?([0-9]+).*?$");
+
+	for (const auto& argument : settings.arguments)
 	{
 		std::vector<QString> uniqueFilesLocal;
 
@@ -82,28 +172,28 @@ void GetArchives(Settings& settings, const QStringList& arguments)
 			Util::ResolveWildcard(wildCard) | std::views::transform([&](const QString& item) {
 				return QFileInfo(item);
 			}) | std::views::filter([&](const QFileInfo& item) {
-				return !uniqueFiles.contains(item.fileName().toLower());
+				auto       fileName = item.fileName().toLower();
+				const auto result   = !uniqueFiles.contains(fileName);
+				if (result)
+					uniqueFilesLocal.emplace_back(fileName);
+				return result;
+			}) | std::views::transform([&](const QFileInfo& item) {
+				auto hashPath = hashFolder.filePath(item.completeBaseName()) + ".xml";
+				return Archive { item.absoluteFilePath(), std::move(hashPath) };
+			}) | std::views::filter([](const Archive& item) {
+				return QFile::exists(item.hashPath);
 			}),
-			std::back_inserter(settings.archives),
-			[&](const QFileInfo& fileInfo) {
-				auto hashPath = hashFolder.filePath(fileInfo.completeBaseName()) + ".xml";
-				if (!QFile::exists(hashPath))
-					throw std::invalid_argument(std::format("hash file {} not found", hashPath));
-
-				uniqueFilesLocal.emplace_back(fileInfo.fileName().toLower());
-				return Archive { fileInfo.absoluteFilePath(), std::move(hashPath) };
+			std::inserter(sorted, sorted.end()),
+			[&](Archive archive) {
+				const auto match = rx.match(QFileInfo(archive.filePath).fileName());
+				return std::make_pair(match.hasMatch() ? match.captured(1).toInt() : 0, std::move(archive));
 			}
 		);
 
 		std::ranges::move(std::move(uniqueFilesLocal), std::inserter(uniqueFiles, uniqueFiles.end()));
 	}
 
-	PLOGD << "Total file count calculation";
-	settings.totalFileCount = std::accumulate(settings.archives.cbegin(), settings.archives.cend(), settings.totalFileCount, [](const size_t init, const Archive& archive) {
-		const Zip zip(archive.filePath);
-		return init + zip.GetFileNameList().size();
-	});
-	PLOGI << "Total file count: " << settings.totalFileCount;
+	return std::move(sorted) | std::views::values | std::views::reverse | std::ranges::to<Archives>();
 }
 
 Settings ProcessCommandLine(const QCoreApplication& app)
@@ -127,11 +217,10 @@ Settings ProcessCommandLine(const QCoreApplication& app)
 
 	if (const auto& positionalArguments = parser.positionalArguments(); !positionalArguments.isEmpty())
 	{
-		GetArchives(settings, parser.positionalArguments());
+		settings.arguments = parser.positionalArguments();
 	}
 	else
 	{
-		PLOGE << "Specifying input archives is mandatory";
 		parser.showHelp();
 	}
 
@@ -141,12 +230,8 @@ Settings ProcessCommandLine(const QCoreApplication& app)
 	}
 	else
 	{
-		PLOGE << "Specifying output folder is mandatory";
 		parser.showHelp();
 	}
-
-	if (!settings.outputDir.exists() && !settings.outputDir.mkpath("."))
-		throw std::ios_base::failure(std::format("Cannot create folder {}", settings.outputDir.path()));
 
 	return settings;
 }
@@ -158,16 +243,21 @@ void run(int argc, char* argv[])
 	QCoreApplication::setApplicationVersion(PRODUCT_VERSION);
 	Util::XMLPlatformInitializer xmlPlatformInitializer;
 
-	auto settings = ProcessCommandLine(app);
+	const auto settings = ProcessCommandLine(app);
 
 	Log::LoggingInitializer                          logging(settings.logFileName.toStdWString());
 	plog::ConsoleAppender<Util::LogConsoleFormatter> consoleAppender;
 	Log::LogAppender                                 logConsoleAppender(&consoleAppender);
 	PLOGI << QString("%1 started").arg(APP_ID);
 
+	if (!settings.outputDir.exists() && !settings.outputDir.mkpath("."))
+		throw std::ios_base::failure(std::format("Cannot create folder {}", settings.outputDir.path()));
+
+	const auto        archives = GetArchives(settings);
+
 	UniqueFileStorage uniqueFileStorage(settings.outputDir.absolutePath());
 
-	ProcessArchives(settings);
+	ProcessArchives(settings, archives, uniqueFileStorage);
 }
 
 } // namespace

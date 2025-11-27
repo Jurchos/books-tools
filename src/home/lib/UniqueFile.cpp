@@ -16,25 +16,6 @@ using namespace HomeCompa;
 namespace
 {
 
-#define HASH_PARSER_CALLBACK_ITEMS_X_MACRO \
-	HASH_PARSER_CALLBACK_ITEM(id)          \
-	HASH_PARSER_CALLBACK_ITEM(folder)      \
-	HASH_PARSER_CALLBACK_ITEM(file)        \
-	HASH_PARSER_CALLBACK_ITEM(title)
-
-struct HashParser
-{
-	using Callback = std::function<void(
-#define HASH_PARSER_CALLBACK_ITEM(NAME) QString NAME,
-		HASH_PARSER_CALLBACK_ITEMS_X_MACRO
-#undef HASH_PARSER_CALLBACK_ITEM
-			QString cover,
-		QStringList images
-	)>;
-
-	static void Parse(QIODevice& input, Callback callback);
-};
-
 class HashParserImpl final : public Util::SaxParser
 {
 	static constexpr auto BOOK       = "books/book";
@@ -113,12 +94,6 @@ private:
 	QString     m_cover;
 	QStringList m_images;
 };
-
-void HashParser::Parse(QIODevice& input, Callback callback)
-{
-	[[maybe_unused]] const HashParserImpl parser(input, std::move(callback));
-}
-
 
 class ISerializer // NOLINT(cppcoreguidelines-special-member-functions)
 {
@@ -338,8 +313,8 @@ UniqueFileStorage::UniqueFileStorage(QString dstDir)
 #define HASH_PARSER_CALLBACK_ITEM(NAME) [[maybe_unused]] QString NAME,
 				HASH_PARSER_CALLBACK_ITEMS_X_MACRO
 #undef HASH_PARSER_CALLBACK_ITEM
-				[[maybe_unused]] QString     cover,
-				[[maybe_unused]] QStringList images
+					QString cover,
+				QStringList images
 			) {
 				decltype(UniqueFile::images) imageItems;
 				std::ranges::transform(std::move(images) | std::views::as_rvalue, std::inserter(imageItems, imageItems.end()), [](QString&& hash) {
@@ -455,7 +430,7 @@ std::pair<ImageItems, ImageItems> UniqueFileStorage::GetNewImages()
 	return std::make_pair(std::move(covers), std::move(images));
 }
 
-void UniqueFileStorage::Save(const QString& folder)
+void UniqueFileStorage::Save(const QString& folder, const bool moveDuplicates)
 {
 	if (m_new.empty() && m_dup.empty())
 		return;
@@ -474,6 +449,16 @@ void UniqueFileStorage::Save(const QString& folder)
 
 	const QDir srcDir     = dstDir.filePath(folder);
 	const QDir duplicates = srcDir.filePath("duplicates");
+	const auto rename     = [&](const QString& fileName) {
+        if (!moveDuplicates)
+            return;
+
+        if (!duplicates.exists())
+            duplicates.mkpath(".");
+
+        [[maybe_unused]] const auto ok = QFile::rename(srcDir.filePath(fileName), duplicates.filePath(fileName));
+        assert(ok);
+	};
 
 	for (auto&& [hash, newItems] : m_new)
 	{
@@ -482,25 +467,17 @@ void UniqueFileStorage::Save(const QString& folder)
 
 		save(it->second);
 
-		if (!newItems.second.empty())
-		{
-			if (!duplicates.exists())
-				duplicates.mkpath(".");
+		if (newItems.second.empty())
+			continue;
 
-			std::ranges::transform(newItems.second, std::back_inserter(m_dup), [&](auto&& item) {
-				[[maybe_unused]] const auto ok = QFile::rename(srcDir.filePath(item.file), duplicates.filePath(item.file));
-				assert(ok);
-				return Dup { std::forward<UniqueFile>(item), it->second };
-			});
-		}
+		std::ranges::transform(newItems.second, std::back_inserter(m_dup), [&](auto&& item) {
+			rename(item.file);
+			return Dup { std::forward<UniqueFile>(item), it->second };
+		});
 	}
 
-	if (!m_dup.empty() && !duplicates.exists())
-		duplicates.mkpath(".");
-
 	std::ranges::for_each(m_dup, [&](Dup& dup) {
-		[[maybe_unused]] const auto ok = QFile::rename(srcDir.filePath(dup.file.file), duplicates.filePath(dup.file.file));
-		assert(ok);
+		rename(dup.file.file);
 		save(dup.file, dup.origin);
 	});
 
@@ -525,4 +502,9 @@ void UniqueFileStorage::Skip(const QString& fileName)
 		textStream >> folder >> file >> duplicatesFolder >> duplicatesFile;
 		m_skip.try_emplace(std::make_pair(std::move(folder), std::move(file)), std::make_pair(std::move(duplicatesFolder), std::move(duplicatesFile)));
 	}
+}
+
+void HashParser::Parse(QIODevice& input, Callback callback)
+{
+	[[maybe_unused]] const HashParserImpl parser(input, std::move(callback));
 }

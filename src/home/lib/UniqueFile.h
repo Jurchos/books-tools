@@ -67,7 +67,7 @@ public:
 	void                                      SetImages(const QString& hash, const QString& fileName, ImageItem cover, std::set<ImageItem> images);
 	UniqueFile*                               Add(QString hash, UniqueFile file);
 	std::pair<ImageItems, ImageItems>         GetNewImages();
-	void                                      Save(const QString& folder);
+	void                                      Save(const QString& folder, bool moveDuplicates);
 	void                                      Skip(const QString& fileName);
 
 private:
@@ -82,6 +82,25 @@ private:
 	std::unordered_multimap<QString, std::pair<UniqueFile, std::vector<UniqueFile>>> m_new;
 
 	const QString m_si;
+};
+
+struct HashParser
+{
+#define HASH_PARSER_CALLBACK_ITEMS_X_MACRO \
+	HASH_PARSER_CALLBACK_ITEM(id)          \
+	HASH_PARSER_CALLBACK_ITEM(folder)      \
+	HASH_PARSER_CALLBACK_ITEM(file)        \
+	HASH_PARSER_CALLBACK_ITEM(title)
+
+	using Callback = std::function<void(
+#define HASH_PARSER_CALLBACK_ITEM(NAME) QString NAME,
+		HASH_PARSER_CALLBACK_ITEMS_X_MACRO
+#undef HASH_PARSER_CALLBACK_ITEM
+			QString cover,
+		QStringList images
+	)>;
+
+	LIB_EXPORT static void Parse(QIODevice& input, Callback callback);
 };
 
 } // namespace HomeCompa

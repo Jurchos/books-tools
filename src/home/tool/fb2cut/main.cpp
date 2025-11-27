@@ -1125,7 +1125,7 @@ bool ProcessArchiveImpl(const QString& archive, Settings settings, std::atomic_i
 		fileProcessor.Wait();
 		auto [covers, images] = uniqueFileStorage.GetNewImages();
 		fileProcessor.ArchiveImages(covers, images);
-		uniqueFileStorage.Save(fileInfo.completeBaseName());
+		uniqueFileStorage.Save(fileInfo.completeBaseName(), settings.saveFb2);
 
 		return fileProcessor.HasError();
 	}();
