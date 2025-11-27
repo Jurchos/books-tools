@@ -622,7 +622,7 @@ private:
 
 		auto split = parseResult.title.split(' ', Qt::SkipEmptyParts);
 
-		auto* file = m_uniqueFileStorage.Add(
+		auto file = m_uniqueFileStorage.Add(
 			hash,
 			{
 				.title        = { std::make_move_iterator(split.begin()), std::make_move_iterator(split.end()) },
@@ -638,7 +638,7 @@ private:
 		if (!file)
 			return bodyOutput;
 
-		std::tie(cover, images) = m_uniqueFileStorage.GetImages(*file);
+		std::tie(cover, images) = m_uniqueFileStorage.GetImages(*file.value());
 		if (m_settings.cover.save && !cover.body.isEmpty())
 			if (auto encoded = encode(m_settings.cover, cover.fileName, cover.image, cover.body); encoded.size() < cover.body.size())
 				cover.body = std::move(encoded);

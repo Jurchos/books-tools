@@ -357,7 +357,7 @@ void UniqueFileStorage::SetImages(const QString& hash, const QString& fileName, 
 	}
 }
 
-UniqueFile* UniqueFileStorage::Add(QString hash, UniqueFile file)
+std::expected<UniqueFile*, std::pair<QString, QString>> UniqueFileStorage::Add(QString hash, UniqueFile file)
 {
 	file.title.erase(m_si);
 
@@ -374,7 +374,7 @@ UniqueFile* UniqueFileStorage::Add(QString hash, UniqueFile file)
 	{
 		PLOGV << QString("%1/%2 skipped by %3/%4, %5").arg(file.folder, file.file, it->second.first, it->second.second, file.GetTitle());
 		m_dup.emplace_back(std::move(file), UniqueFile { .folder = it->second.first, .file = it->second.second }).file.ClearImages();
-		return nullptr;
+		return std::unexpected(it->first);
 	}
 
 	for (auto [it, end] = m_old.equal_range(hash); it != end; ++it)
@@ -391,7 +391,7 @@ UniqueFile* UniqueFileStorage::Add(QString hash, UniqueFile file)
 
 		log(it->second);
 		m_dup.emplace_back(std::move(file), it->second).file.ClearImages();
-		return nullptr;
+		return std::unexpected(std::make_pair(it->second.folder, it->second.file));
 	}
 
 	for (auto [it, end] = m_new.equal_range(hash); it != end; ++it)
@@ -405,7 +405,7 @@ UniqueFile* UniqueFileStorage::Add(QString hash, UniqueFile file)
 		if (imagesCompareResult == UniqueFile::ImagesCompareResult::Outer || (imagesCompareResult == UniqueFile::ImagesCompareResult::Equal && it->second.first.order > file.order))
 		{
 			it->second.second.emplace_back(std::move(file)).ClearImages();
-			return nullptr;
+			return std::unexpected(std::make_pair(it->second.first.folder, it->second.first.file));
 		}
 
 		it->second.second.emplace_back(std::move(it->second.first)).ClearImages();

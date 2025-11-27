@@ -1,4 +1,6 @@
 #pragma once
+
+#include <expected>
 #include <set>
 
 #include <QDateTime>
@@ -63,12 +65,12 @@ public:
 	explicit UniqueFileStorage(QString dstDir);
 
 public:
-	std::pair<ImageItem, std::set<ImageItem>> GetImages(UniqueFile& file);
-	void                                      SetImages(const QString& hash, const QString& fileName, ImageItem cover, std::set<ImageItem> images);
-	UniqueFile*                               Add(QString hash, UniqueFile file);
-	std::pair<ImageItems, ImageItems>         GetNewImages();
-	void                                      Save(const QString& folder, bool moveDuplicates);
-	void                                      Skip(const QString& fileName);
+	std::pair<ImageItem, std::set<ImageItem>>               GetImages(UniqueFile& file);
+	void                                                    SetImages(const QString& hash, const QString& fileName, ImageItem cover, std::set<ImageItem> images);
+	std::expected<UniqueFile*, std::pair<QString, QString>> Add(QString hash, UniqueFile file);
+	std::pair<ImageItems, ImageItems>                       GetNewImages();
+	void                                                    Save(const QString& folder, bool moveDuplicates);
+	void                                                    Skip(const QString& fileName);
 
 private:
 	const QString m_dstDir;
