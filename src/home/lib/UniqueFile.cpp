@@ -140,13 +140,13 @@ private: // ISerializer
 	void Serialize(const UniqueFile& file, const UniqueFile& origin) override
 	{
 		const auto book = m_booksGuard->Guard("book");
-		book->WriteAttribute("id", file.hashText).WriteAttribute("folder", file.folder).WriteAttribute("file", file.file).WriteAttribute("title", file.GetTitle());
+		book->WriteAttribute("id", file.hashText).WriteAttribute("folder", file.uid.folder).WriteAttribute("file", file.uid.file).WriteAttribute("title", file.GetTitle());
 		if (!file.cover.fileName.isEmpty())
 			book->Guard("cover")->WriteCharacters(file.cover.hash);
 		for (const auto& image : file.images)
 			book->Guard("image")->WriteCharacters(image.hash);
-		if (!origin.file.isEmpty())
-			book->Guard("duplicates")->WriteAttribute("folder", origin.folder).WriteAttribute("file", origin.file);
+		if (!origin.uid.file.isEmpty())
+			book->Guard("duplicates")->WriteAttribute("folder", origin.uid.folder).WriteAttribute("file", origin.uid.file);
 
 		qsizetype depth = -1;
 		for (const auto& str : file.hashSections)
@@ -190,6 +190,13 @@ private:
 	Util::XmlWriter::XmlNodeGuard m_booksGuard { m_writer.Guard("books") };
 };
 
+class DuplicateObserverStub final : public UniqueFileStorage::IDuplicateObserver
+{
+	void OnDuplicateFound(const UniqueFile::Uid&, const UniqueFile::Uid&) override
+	{
+	}
+};
+
 QString createSi()
 {
 	QString result;
@@ -207,7 +214,7 @@ bool ImageItem::operator<(const ImageItem& rhs) const
 
 bool UniqueFile::operator<(const UniqueFile& rhs) const
 {
-	assert(folder == rhs.folder);
+	assert(uid.folder == rhs.uid.folder);
 	return order > rhs.order;
 }
 
@@ -277,7 +284,7 @@ UniqueFile::ImagesCompareResult UniqueFile::CompareImages(const UniqueFile& rhs)
 	if (std::ranges::includes(title, rhs.title) || std::ranges::includes(rhs.title, title))
 		return result;
 
-	PLOGW << QString("same hash, different titles: %1/%2 %3 vs %4/%5 %6").arg(folder, file, GetTitle(), rhs.folder, rhs.file, rhs.GetTitle());
+	PLOGW << QString("same hash, different titles: %1/%2 %3 vs %4/%5 %6").arg(uid.folder, uid.file, GetTitle(), rhs.uid.folder, rhs.uid.file, rhs.GetTitle());
 	return ImagesCompareResult::Varied;
 }
 
@@ -294,6 +301,7 @@ void UniqueFile::ClearImages()
 
 UniqueFileStorage::UniqueFileStorage(QString dstDir)
 	: m_dstDir { std::move(dstDir) }
+	, m_duplicateObserver { std::make_unique<DuplicateObserverStub>() }
 	, m_si { createSi() }
 {
 	if (m_dstDir.isEmpty())
@@ -322,9 +330,8 @@ UniqueFileStorage::UniqueFileStorage(QString dstDir)
 				});
 				auto       split = title.split(' ', Qt::SkipEmptyParts);
 				UniqueFile uniqueFile {
+					.uid      = { .folder = std::move(folder), .file = std::move(file) },
 					.title    = { std::make_move_iterator(split.begin()), std::make_move_iterator(split.end()) },
-					.folder   = std::move(folder),
-					.file     = std::move(file),
 					.hashText = id,
 					.cover    = { .hash = std::move(cover) },
 					.images   = std::move(imageItems)
@@ -348,7 +355,7 @@ void UniqueFileStorage::SetImages(const QString& hash, const QString& fileName, 
 	std::lock_guard lock(m_guard);
 	for (auto [it, end] = m_new.equal_range(hash); it != end; ++it)
 	{
-		if (it->second.first.file == fileName)
+		if (it->second.first.uid.file == fileName)
 		{
 			it->second.first.cover  = std::move(cover);
 			it->second.first.images = std::move(images);
@@ -357,7 +364,7 @@ void UniqueFileStorage::SetImages(const QString& hash, const QString& fileName, 
 	}
 }
 
-std::expected<UniqueFile*, std::pair<QString, QString>> UniqueFileStorage::Add(QString hash, UniqueFile file)
+UniqueFile* UniqueFileStorage::Add(QString hash, UniqueFile file)
 {
 	file.title.erase(m_si);
 
@@ -367,14 +374,22 @@ std::expected<UniqueFile*, std::pair<QString, QString>> UniqueFileStorage::Add(Q
 		return &m_new.emplace(std::move(hash), std::make_pair(std::move(file), std::vector<UniqueFile> {}))->second.first;
 
 	const auto log = [&](const UniqueFile& old) {
-		PLOGV << QString("duplicates detected: %1/%2 vs %3/%4, %5").arg(file.folder, file.file, old.folder, old.file, file.GetTitle());
+		m_duplicateObserver->OnDuplicateFound(file.uid, old.uid);
+		PLOGV << QString("duplicates detected: %1/%2 vs %3/%4, %5").arg(file.uid.folder, file.uid.file, old.uid.folder, old.uid.file, file.GetTitle());
 	};
 
-	if (const auto it = m_skip.find(std::make_pair(file.folder, file.file)); it != m_skip.end())
+	if (const auto it = m_skip.find(std::make_pair(file.uid.folder, file.uid.file)); it != m_skip.end())
 	{
-		PLOGV << QString("%1/%2 skipped by %3/%4, %5").arg(file.folder, file.file, it->second.first, it->second.second, file.GetTitle());
-		m_dup.emplace_back(std::move(file), UniqueFile { .folder = it->second.first, .file = it->second.second }).file.ClearImages();
-		return std::unexpected(it->first);
+		PLOGV << QString("%1/%2 skipped by %3/%4, %5").arg(file.uid.folder, file.uid.file, it->second.first, it->second.second, file.GetTitle());
+		m_dup
+			.emplace_back(
+				std::move(file),
+				UniqueFile {
+					.uid = { .folder = it->second.first, .file = it->second.second, }
+        }
+			)
+			.file.ClearImages();
+		return nullptr;
 	}
 
 	for (auto [it, end] = m_old.equal_range(hash); it != end; ++it)
@@ -385,13 +400,13 @@ std::expected<UniqueFile*, std::pair<QString, QString>> UniqueFileStorage::Add(Q
 
 		if (imagesCompareResult == UniqueFile::ImagesCompareResult::Inner)
 		{
-			PLOGW << QString("old duplicate detected by %1/%2: %3/%4, %5").arg(file.folder, file.file, it->second.folder, it->second.file, file.GetTitle());
+			PLOGW << QString("old duplicate detected by %1/%2: %3/%4, %5").arg(file.uid.folder, file.uid.file, it->second.uid.folder, it->second.uid.file, file.GetTitle());
 			continue;
 		}
 
 		log(it->second);
 		m_dup.emplace_back(std::move(file), it->second).file.ClearImages();
-		return std::unexpected(std::make_pair(it->second.folder, it->second.file));
+		return nullptr;
 	}
 
 	for (auto [it, end] = m_new.equal_range(hash); it != end; ++it)
@@ -405,7 +420,7 @@ std::expected<UniqueFile*, std::pair<QString, QString>> UniqueFileStorage::Add(Q
 		if (imagesCompareResult == UniqueFile::ImagesCompareResult::Outer || (imagesCompareResult == UniqueFile::ImagesCompareResult::Equal && it->second.first.order > file.order))
 		{
 			it->second.second.emplace_back(std::move(file)).ClearImages();
-			return std::unexpected(std::make_pair(it->second.first.folder, it->second.first.file));
+			return nullptr;
 		}
 
 		it->second.second.emplace_back(std::move(it->second.first)).ClearImages();
@@ -471,13 +486,13 @@ void UniqueFileStorage::Save(const QString& folder, const bool moveDuplicates)
 			continue;
 
 		std::ranges::transform(newItems.second, std::back_inserter(m_dup), [&](auto&& item) {
-			rename(item.file);
+			rename(item.uid.file);
 			return Dup { std::forward<UniqueFile>(item), it->second };
 		});
 	}
 
 	std::ranges::for_each(m_dup, [&](Dup& dup) {
-		rename(dup.file.file);
+		rename(dup.file.uid.file);
 		save(dup.file, dup.origin);
 	});
 
@@ -502,6 +517,11 @@ void UniqueFileStorage::Skip(const QString& fileName)
 		textStream >> folder >> file >> duplicatesFolder >> duplicatesFile;
 		m_skip.try_emplace(std::make_pair(std::move(folder), std::move(file)), std::make_pair(std::move(duplicatesFolder), std::move(duplicatesFile)));
 	}
+}
+
+void UniqueFileStorage::SetDuplicateObserver(std::unique_ptr<IDuplicateObserver> duplicateObserver)
+{
+	m_duplicateObserver = std::move(duplicateObserver);
 }
 
 void HashParser::Parse(QIODevice& input, Callback callback)

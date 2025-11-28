@@ -625,9 +625,8 @@ private:
 		auto file = m_uniqueFileStorage.Add(
 			hash,
 			{
+				.uid          = {                     .folder = m_folder,                .file = inputFilePath },
 				.title        = { std::make_move_iterator(split.begin()), std::make_move_iterator(split.end()) },
-				.folder       = m_folder,
-				.file         = inputFilePath,
 				.hashText     = std::move(parseResult.hashText),
 				.hashSections = std::move(parseResult.hashSections),
 				.cover        = std::move(cover),
@@ -638,7 +637,7 @@ private:
 		if (!file)
 			return bodyOutput;
 
-		std::tie(cover, images) = m_uniqueFileStorage.GetImages(*file.value());
+		std::tie(cover, images) = m_uniqueFileStorage.GetImages(*file);
 		if (m_settings.cover.save && !cover.body.isEmpty())
 			if (auto encoded = encode(m_settings.cover, cover.fileName, cover.image, cover.body); encoded.size() < cover.body.size())
 				cover.body = std::move(encoded);

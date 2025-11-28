@@ -322,6 +322,9 @@ void CreateInpx(Settings& settings, InpData& inpData, const QString& sourceLib)
 	);
 
 	const auto collectionInfo = [&]() -> QString {
+		if (!QFile::exists(settings.collectionInfoTemplateFile))
+			return {};
+
 		if (QFile file(settings.collectionInfoTemplateFile); file.open(QIODevice::ReadOnly))
 			return QString::fromUtf8(file.readAll()).arg(maxTime.toString("yyyy-MM-dd"), maxTime.toString("yyyyMMdd"));
 

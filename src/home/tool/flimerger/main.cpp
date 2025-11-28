@@ -17,6 +17,9 @@
 #include "util/LogConsoleFormatter.h"
 #include "util/files.h"
 #include "util/xml/Initializer.h"
+#include "util/xml/SaxParser.h"
+#include "util/xml/XmlAttributes.h"
+#include "util/xml/XmlWriter.h"
 
 #include "Constant.h"
 #include "log.h"
@@ -62,54 +65,79 @@ struct Settings
 	QString     logFileName;
 };
 
-void ProcessArchive(const QDir& outputDir, const Archive& archive, UniqueFileStorage& uniqueFileStorage, Replacement& replacement)
+class HashCopier final : public Util::SaxParser
 {
-	QFile file(archive.hashPath);
-	if (!file.open(QIODevice::ReadOnly))
-		throw std::invalid_argument(std::format("Cannot read from {}", archive.hashPath));
+public:
+	HashCopier(QIODevice& input, QIODevice& output, QString folder, const Replacement& replacement)
+		: SaxParser(input, 512)
+		, m_replacement { replacement }
+		, m_writer { output }
+		, m_folder { std::move(folder) }
+	{
+		Parse();
+	}
 
-	Util::Remove::Books toRemove;
+private:
+	bool OnStartElement(const QString& name, const QString& path, const Util::XmlAttributes& attributes) override
+	{
+		if (path == "books/book")
+			m_file = attributes.GetAttribute("file");
 
-	const QFileInfo fileInfo(archive.filePath);
+		m_writer.WriteStartElement(name, attributes);
+		return true;
+	}
 
-	HashParser::Parse(
-		file,
-		[&, idBook = 0LL](
-#define HASH_PARSER_CALLBACK_ITEM(NAME) QString NAME,
-			HASH_PARSER_CALLBACK_ITEMS_X_MACRO
-#undef HASH_PARSER_CALLBACK_ITEM
-				QString cover,
-			QStringList images
-		) mutable {
-			decltype(UniqueFile::images) imageItems;
-			std::ranges::transform(std::move(images) | std::views::as_rvalue, std::inserter(imageItems, imageItems.end()), [](QString&& hash) {
-				return ImageItem { .hash = std::move(hash) };
-			});
-			auto split    = title.split(' ', Qt::SkipEmptyParts);
-			auto hashText = id;
-
-			auto uniqueFile = uniqueFileStorage.Add(
-				std::move(id),
-				UniqueFile {
-					.title    = { std::make_move_iterator(split.begin()), std::make_move_iterator(split.end()) },
-					.folder   = std::move(folder),
-					.file     = file,
-					.hashText = std::move(hashText),
-					.cover    = { .hash = std::move(cover) },
-					.images   = std::move(imageItems)
-            }
-			);
-
-			if (uniqueFile)
-				return;
-
-			const auto& book         = toRemove.emplace_back(++idBook, fileInfo.fileName(), std::move(file));
-			auto&       replacedWith = uniqueFile.error();
-			replacement.try_emplace(std::make_pair(book.folder, book.file), std::make_pair(std::move(replacedWith.first), std::move(replacedWith.second)));
+	bool OnEndElement(const QString& /*name*/, const QString& path) override
+	{
+		if (path == "books/book")
+		{
+			if (const auto it = m_replacement.find(std::make_pair(m_folder, m_file)); it != m_replacement.end())
+			{
+				auto duplicates = m_writer.Guard("duplicates");
+				duplicates->WriteAttribute("folder", QFileInfo(it->second.first).completeBaseName());
+				duplicates->WriteAttribute("file", it->second.second);
+			}
+			m_file.clear();
 		}
-	);
 
-	uniqueFileStorage.Save(fileInfo.completeBaseName(), false);
+		m_writer.WriteEndElement();
+		return true;
+	}
+
+	bool OnCharacters(const QString& /*path*/, const QString& value) override
+	{
+		m_writer.WriteCharacters(value);
+		return true;
+	}
+
+private:
+	const Replacement& m_replacement;
+	Util::XmlWriter    m_writer;
+	const QString      m_folder;
+	QString            m_file;
+};
+
+class DuplicateObserver final : public UniqueFileStorage::IDuplicateObserver
+{
+public:
+	explicit DuplicateObserver(Replacement& replacement)
+		: m_replacement { replacement }
+	{
+	}
+
+private: // UniqueFileStorage::IDuplicateObserver
+	void OnDuplicateFound(const UniqueFile::Uid& file, const UniqueFile::Uid& duplicate) override
+	{
+		m_replacement.try_emplace(std::make_pair(duplicate.folder, duplicate.file), std::make_pair(file.folder, file.file));
+	}
+
+private:
+	Replacement& m_replacement;
+};
+
+void ProcessArchive(const QDir& outputDir, const Archive& archive, const Replacement& replacement)
+{
+	const QFileInfo fileInfo(archive.filePath);
 
 	const auto dstFilePath = outputDir.filePath(fileInfo.fileName());
 	QFile::remove(dstFilePath);
@@ -136,6 +164,16 @@ void ProcessArchive(const QDir& outputDir, const Archive& archive, UniqueFileSto
 			throw std::invalid_argument(std::format("Cannot copy {} to {}", imageArchiveFileSrc, imageArchiveFileDst));
 	}
 
+	auto toRemove = Zip(dstFilePath).GetFileNameList() | std::views::filter([&](const QString& fileName) {
+						const auto key    = std::make_pair(fileInfo.fileName(), fileName);
+						const auto result = replacement.contains(key);
+						return result;
+					})
+	              | std::views::transform([&, n = 0](const QString& fileName) mutable {
+						return Util::Remove::Book { ++n, fileInfo.fileName(), fileName };
+					})
+	              | std::ranges::to<Util::Remove::Books>();
+
 	if (toRemove.empty())
 		return;
 
@@ -149,21 +187,107 @@ void ProcessArchive(const QDir& outputDir, const Archive& archive, UniqueFileSto
 	Util::Remove::RemoveFiles(allFiles, outputDir.absolutePath());
 }
 
-Replacement ProcessArchives(const QDir& outputDir, const Archives& archives, UniqueFileStorage& uniqueFileStorage)
+void ProcessArchives(const QDir& outputDir, const Archives& archives, const Replacement& replacement)
 {
-	PLOGD << "Total file count calculation";
-	const auto totalFileCount = std::accumulate(archives.cbegin(), archives.cend(), size_t { 0 }, [](const size_t init, const Archive& archive) {
-		const Zip zip(archive.filePath);
-		return init + zip.GetFileNameList().size();
-	});
-	PLOGI << "Total file count: " << totalFileCount;
-
-	Replacement replacement;
-
 	for (const auto& archive : archives)
-		ProcessArchive(outputDir, archive, uniqueFileStorage, replacement);
+		ProcessArchive(outputDir, archive, replacement);
+}
 
-	return replacement;
+void ProcessHash(const QDir& outputDir, const Archive& archive, const Replacement& replacement)
+{
+	outputDir.mkpath("hash");
+	QFileInfo fileInfo(archive.hashPath);
+
+	QFile input(archive.hashPath);
+	if (!input.open(QIODevice::ReadOnly))
+		throw std::ios_base::failure(std::format("Cannot read from {}", archive.hashPath));
+
+	const auto outputFilePath = outputDir.filePath(QString("hash/%1").arg(fileInfo.fileName()));
+
+	QFile output(outputFilePath);
+	if (!output.open(QIODevice::WriteOnly))
+		throw std::ios_base::failure(std::format("Cannot write to", outputFilePath));
+
+	HashCopier parser(input, output, QFileInfo(archive.filePath).fileName(), replacement);
+}
+
+void ProcessHash(const QDir& outputDir, const Archives& archives, const Replacement& replacement)
+{
+	for (const auto& archive : archives)
+		ProcessHash(outputDir, archive, replacement);
+}
+
+void GetReplacement(const Archive& archive, UniqueFileStorage& uniqueFileStorage)
+{
+	QFile file(archive.hashPath);
+	if (!file.open(QIODevice::ReadOnly))
+		throw std::invalid_argument(std::format("Cannot read from {}", archive.hashPath));
+
+	const QFileInfo fileInfo(archive.filePath);
+
+	std::unordered_map<QString, QString> titles;
+	for (const auto& inpx : fileInfo.dir().entryList({ "*.inpx" }, QDir::Files))
+	{
+		Zip        zip(fileInfo.dir().absoluteFilePath(inpx));
+		const auto zipFile = zip.Read(fileInfo.completeBaseName() + ".inp");
+		auto&      stream  = zipFile->GetStream();
+		for (auto byteArray = stream.readLine(); !byteArray.isEmpty(); byteArray = stream.readLine())
+		{
+			auto book = Book::FromString(QString::fromUtf8(byteArray));
+			titles.try_emplace(book.GetFileName(), SimplifyTitle(PrepareTitle(book.title)));
+		}
+	}
+
+	const auto bookFiles = Zip(archive.filePath).GetFileNameList() | std::ranges::to<std::unordered_set<QString>>();
+
+	HashParser::Parse(
+		file,
+		[&, idBook = 0LL](
+#define HASH_PARSER_CALLBACK_ITEM(NAME) [[maybe_unused]] QString NAME,
+			HASH_PARSER_CALLBACK_ITEMS_X_MACRO
+#undef HASH_PARSER_CALLBACK_ITEM
+				QString cover,
+			QStringList images
+		) mutable {
+			decltype(UniqueFile::images) imageItems;
+			std::ranges::transform(std::move(images) | std::views::as_rvalue, std::inserter(imageItems, imageItems.end()), [](QString&& hash) {
+				return ImageItem { .hash = std::move(hash) };
+			});
+
+			if (!bookFiles.contains(file))
+				return;
+
+			const auto it = titles.find(file);
+			if (it != titles.end() && !it->second.isEmpty())
+				title = std::move(it->second);
+
+			auto split    = title.split(' ', Qt::SkipEmptyParts);
+			auto hashText = id;
+
+			uniqueFileStorage.Add(
+				std::move(id),
+				UniqueFile {
+					.uid      = { .folder = fileInfo.fileName(), .file = file },
+					.title    = { std::make_move_iterator(split.begin()), std::make_move_iterator(split.end()) },
+					.hashText = std::move(hashText),
+					.cover    = { .hash = std::move(cover) },
+					.images   = std::move(imageItems)
+            }
+			);
+
+			//			if (uniqueFile)
+			//				return;
+
+			//			auto& replacedWith = uniqueFile.error();
+			//			replacement.try_emplace(std::make_pair(fileInfo.fileName(), std::move(file)), std::make_pair(std::move(replacedWith.first), std::move(replacedWith.second)));
+		}
+	);
+}
+
+void GetReplacement(const Archives& archives, UniqueFileStorage& uniqueFileStorage)
+{
+	for (const auto& archive : archives)
+		GetReplacement(archive, uniqueFileStorage);
 }
 
 Archives GetArchives(const Settings& settings)
@@ -225,7 +349,7 @@ QDateTime ProcessInpx(IZipFileController& zipFiles, const QString& inpxFilePath,
 		{
 			++total;
 			const auto book = Book::FromString(QString::fromUtf8(byteArray));
-			if (replacement.contains(std::make_pair(QFileInfo(inpFileName).completeBaseName() + ".7z", book.file + '.' + book.ext)))
+			if (replacement.contains(std::make_pair(QFileInfo(inpFileName).completeBaseName() + ".7z", book.GetFileName())))
 				++counter;
 			else
 				bytes.append(byteArray);
@@ -275,6 +399,9 @@ void ProcessInpx(const Settings& settings, const Archives& archives, const Repla
 	zipFiles->AddFile(Inpx::STRUCTURE_INFO, Inpx::INP_FIELDS_DESCRIPTION, QDateTime::currentDateTime());
 	zipFiles->AddFile(QString::fromStdWString(Inpx::VERSION_INFO), maxDateTime.toString("yyyyMMdd").toUtf8(), QDateTime::currentDateTime());
 	const auto collectionInfo = [&]() -> QString {
+		if (!QFile::exists(settings.collectionInfoTemplateFile))
+			return {};
+
 		if (QFile file(settings.collectionInfoTemplateFile); file.open(QIODevice::ReadOnly))
 			return QString::fromUtf8(file.readAll()).arg(maxDateTime.toString("yyyy-MM-dd"), maxDateTime.toString("yyyyMMdd"));
 
@@ -348,10 +475,22 @@ void run(int argc, char* argv[])
 
 	const auto archives = GetArchives(settings);
 
+	PLOGD << "Total file count calculation";
+	const auto totalFileCount = std::accumulate(archives.cbegin(), archives.cend(), size_t { 0 }, [](const size_t init, const Archive& archive) {
+		const Zip zip(archive.filePath);
+		return init + zip.GetFileNameList().size();
+	});
+	PLOGI << "Total file count: " << totalFileCount;
+
 	UniqueFileStorage uniqueFileStorage(settings.outputDir.absolutePath());
 
-	const auto replacement = ProcessArchives(settings.outputDir, archives, uniqueFileStorage);
+	Replacement replacement;
+	uniqueFileStorage.SetDuplicateObserver(std::make_unique<DuplicateObserver>(replacement));
+	GetReplacement(archives, uniqueFileStorage);
+
+	ProcessArchives(settings.outputDir, archives, replacement);
 	ProcessInpx(settings, archives, replacement);
+	ProcessHash(settings.outputDir, archives, replacement);
 }
 
 } // namespace
