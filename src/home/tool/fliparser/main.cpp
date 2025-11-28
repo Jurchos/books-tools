@@ -306,8 +306,9 @@ void CreateInpx(Settings& settings, InpData& inpData, const QString& sourceLib)
 				book->sourceLib = sourceLib;
 
 				QFileInfo fileInfo(bookFile);
-				book->file = fileInfo.completeBaseName();
-				book->ext  = fileInfo.suffix();
+				book->file   = fileInfo.completeBaseName();
+				book->ext    = fileInfo.suffix();
+				book->folder = QString::fromStdWString(path.filename());
 
 				file << *book;
 
@@ -340,30 +341,30 @@ void CreateInpx(Settings& settings, InpData& inpData, const QString& sourceLib)
 
 QByteArray CreateReviewAdditional(const Settings& settings)
 {
-	QJsonObject jsonObject;
+	QJsonArray jsonArray;
 	for (const auto& book : settings.hashToBook | std::views::values | std::views::filter([&](const Book* item) {
 								return item->rate > std::numeric_limits<double>::epsilon() && settings.fileToFolder.contains(item->file + "." + item->ext);
 							}))
 	{
-		jsonObject.insert(
-			book->libId,
-			QJsonObject {
-				{ "libRate", book->rate / book->rateCount }
-        }
-		);
+		jsonArray.append(QJsonObject {
+			{ "folder",                 book->folder },
+			{   "file", book->file + '.' + book->ext },
+			{    "sum",                   book->rate },
+			{  "count",              book->rateCount },
+		});
 	}
 
-	if (jsonObject.isEmpty())
+	if (jsonArray.isEmpty())
 		return {};
 
-	return QJsonDocument(jsonObject).toJson();
+	return QJsonDocument(jsonArray).toJson();
 }
 
 std::vector<std::tuple<QString, QByteArray>> CreateReviewData(const IDatabase& db, const Settings& settings)
 {
 	auto threadPool = std::make_unique<Util::ThreadPool>();
 
-	const auto reviewsFolder = settings.outputFolder / Inpx::REVIEWS_FOLDER / db.GetName().toStdWString();
+	const auto reviewsFolder = settings.outputFolder / Inpx::REVIEWS_FOLDER;
 	QDir(reviewsFolder).mkpath(".");
 	int currentMonth { -1 };
 
@@ -479,7 +480,7 @@ std::vector<std::tuple<QString, QByteArray>> CreateReviewData(const IDatabase& d
 		if (const auto month = QStringView(time.begin(), std::next(time.begin(), 4)).toInt() * 100 + QStringView(std::next(time.begin(), 5), std::next(time.begin(), 7)).toInt(); month != currentMonth)
 			write(month);
 
-		data[book->libId].emplace_back(std::move(name), std::move(time), std::move(text));
+		data[book->GetUid()].emplace_back(std::move(name), std::move(time), std::move(text));
 	});
 
 	write(currentMonth);

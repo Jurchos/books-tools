@@ -35,6 +35,11 @@ Book Book::FromString(const QString& str)
 	};
 }
 
+QString Book::GetUid() const
+{
+	return QString("%1#%2.%3").arg(folder, file, ext);
+}
+
 namespace HomeCompa
 {
 

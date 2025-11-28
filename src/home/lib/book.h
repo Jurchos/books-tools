@@ -51,9 +51,11 @@ struct Book
 	QString             sourceLib;
 
 	QString      id;
+	QString      folder;
 	Section::Ptr section;
 
 	LIB_EXPORT static Book FromString(const QString& str);
+	LIB_EXPORT QString     GetUid() const;
 };
 
 LIB_EXPORT QByteArray& operator<<(QByteArray& bytes, const Book& book);
