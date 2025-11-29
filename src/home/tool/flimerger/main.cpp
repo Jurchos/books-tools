@@ -335,7 +335,49 @@ Archives GetArchives(const Settings& settings)
 	return std::move(sorted) | std::views::values | std::views::reverse | std::ranges::to<Archives>();
 }
 
-QDateTime ProcessInpx(IZipFileController& zipFiles, const QString& inpxFilePath, const UniquePaths& inputPaths, const Replacement& replacement)
+using ContentsItem = std::tuple<QString /*authors*/, QString /*title*/, QString /*series*/, QString /*seqNum*/>;
+using Contents     = std::unordered_map<QString /*lang*/, std::unordered_map<BookItem, ContentsItem, Util::PairHash<QString, QString>>>;
+
+void WriteContents(const QDir& outputDir, Contents& contents)
+{
+	PLOGI << "collect contents";
+
+	const auto outputFilePath = outputDir.absoluteFilePath(QString::fromStdWString(Inpx::CONTENTS));
+	QFile::remove(outputFilePath);
+
+	auto zipFiles = Zip::CreateZipFileController();
+	for (auto&& [lang, books] : contents)
+	{
+		const ScopedCall logGuard([&] {
+			PLOGI << lang << ": " << books.size();
+		});
+
+		std::vector<std::tuple<QString /*authors*/, QString /*title*/, QString /*series*/, QString /*folder*/, QString /*file*/>> sorted;
+		for (auto&& [uid, book] : books)
+			sorted.emplace_back(
+				std::move(std::get<0>(book)),
+				std::move(std::get<1>(book)),
+				std::get<2>(book).isEmpty() ? QString {} : QString("[%1%2]").arg(std::get<2>(book), std::get<3>(book).isEmpty() ? QString {} : QString(" #%1").arg(std::get<3>(book))),
+				uid.first,
+				uid.second
+			);
+		std::ranges::sort(sorted);
+
+		QByteArray data;
+		for (const auto& item : sorted)
+			data.append(QString("%1\t%2\t%3\t%4\t%5\x0d\x0a").arg(std::get<0>(item), std::get<1>(item), std::get<2>(item), std::get<3>(item), std::get<4>(item)).toUtf8());
+
+		zipFiles->AddFile(QString("%1.txt").arg(lang), std::move(data));
+	}
+
+	PLOGI << "archive contents";
+	Zip zip(outputFilePath, Zip::Format::SevenZip);
+	zip.SetProperty(ZipDetails::PropertyId::SolidArchive, false);
+	zip.SetProperty(Zip::PropertyId::CompressionMethod, QVariant::fromValue(Zip::CompressionMethod::Ppmd));
+	zip.Write(std::move(zipFiles));
+}
+
+QDateTime ProcessInpx(IZipFileController& zipFiles, const QString& inpxFilePath, const UniquePaths& inputPaths, const Replacement& replacement, Contents& contents)
 {
 	const auto inputInpFiles = inputPaths | std::views::transform([](const QString& item) {
 								   return QFileInfo(item).completeBaseName().toLower() + ".inp";
@@ -354,11 +396,17 @@ QDateTime ProcessInpx(IZipFileController& zipFiles, const QString& inpxFilePath,
 		for (auto byteArray = stream.readLine(); !byteArray.isEmpty(); byteArray = stream.readLine())
 		{
 			++total;
-			const auto book = Book::FromString(QString::fromUtf8(byteArray));
-			if (replacement.contains(std::make_pair(QFileInfo(inpFileName).completeBaseName() + ".7z", book.GetFileName())))
-				++counter;
-			else
-				bytes.append(byteArray);
+			auto book   = Book::FromString(QString::fromUtf8(byteArray));
+			book.folder = QFileInfo(inpFileName).completeBaseName() + ".7z";
+			if (replacement.contains(std::make_pair(book.folder, book.GetFileName())))
+				continue;
+
+			++counter;
+			bytes.append(byteArray);
+			contents[book.lang].try_emplace(
+				std::make_pair(book.folder, book.GetFileName()),
+				std::make_tuple(book.author, book.title, book.series.empty() ? QString {} : book.series.front().title, book.series.empty() ? QString {} : book.series.front().serNo)
+			);
 		}
 
 		if (bytes.isEmpty())
@@ -367,7 +415,7 @@ QDateTime ProcessInpx(IZipFileController& zipFiles, const QString& inpxFilePath,
 			continue;
 		}
 
-		PLOGI << inpFileName << " rows removed: " << counter << " of " << total;
+		PLOGI << inpFileName << " rows removed: " << total - counter << " of " << total;
 
 		auto inpFileDateTime = zip.GetFileTime(inpFileName);
 		zipFiles.AddFile(inpFileName, std::move(bytes), inpFileDateTime);
@@ -380,13 +428,16 @@ QDateTime ProcessInpx(IZipFileController& zipFiles, const QString& inpxFilePath,
 
 void MergeInpx(const Settings& settings, const InputDirs& inputDirs, const Replacement& replacement)
 {
-	auto zipFiles    = Zip::CreateZipFileController();
-	auto maxDateTime = QDateTime::fromSecsSinceEpoch(0);
+	auto     zipFiles    = Zip::CreateZipFileController();
+	auto     maxDateTime = QDateTime::fromSecsSinceEpoch(0);
+	Contents contents;
 
 	for (const auto& [inputDir, inputPaths] : inputDirs)
 		for (const auto& inpx : inputDir.entryList({ "*.inpx" }, QDir::Files))
-			if (auto inpxFileDateTime = ProcessInpx(*zipFiles, inputDir.absoluteFilePath(inpx), inputPaths, replacement); maxDateTime < inpxFileDateTime)
+			if (auto inpxFileDateTime = ProcessInpx(*zipFiles, inputDir.absoluteFilePath(inpx), inputPaths, replacement, contents); maxDateTime < inpxFileDateTime)
 				maxDateTime = std::move(inpxFileDateTime);
+
+	WriteContents(settings.outputDir, contents);
 
 	const auto outputZipFilePath = settings.outputDir.absoluteFilePath(settings.outputDir.dirName() + ".inpx");
 	QFile::remove(outputZipFilePath);
