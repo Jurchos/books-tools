@@ -605,9 +605,9 @@ void ProcessCompilations(Settings& settings)
 					continue;
 
 				found.append(QJsonObject {
-					{       "part",                      std::ssize(idFound) },
-					{ Inpx::FOLDER,                 folderIt->second.front() },
-					{   Inpx::FILE, it->second->file + '.' + it->second->ext },
+					{   Inpx::PART,       std::ssize(idFound) },
+					{ Inpx::FOLDER,  folderIt->second.front() },
+					{   Inpx::FILE, it->second->GetFileName() },
 				});
 
 				idFound.emplace(id);
@@ -631,10 +631,10 @@ void ProcessCompilations(Settings& settings)
 		if (idFound.size() > 1)
 		{
 			QJsonObject compilation {
-				{  Inpx::FOLDER,     folderIt->second.front() },
-				{    Inpx::FILE, book->file + '.' + book->ext },
-				{ "compilation",             std::move(found) },
-				{     "covered",           idNotFound.empty() },
+				{      Inpx::FOLDER, folderIt->second.front() },
+				{        Inpx::FILE,      book->GetFileName() },
+				{ Inpx::COMPILATION,         std::move(found) },
+				{     Inpx::COVERED,       idNotFound.empty() },
 			};
 			/*
 			if (!idNotFound.empty())
