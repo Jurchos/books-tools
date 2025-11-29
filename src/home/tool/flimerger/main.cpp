@@ -4,10 +4,14 @@
 
 #include <QCommandLineParser>
 #include <QDir>
-#include <QRegularExpression>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QStandardPaths>
 
 #include <plog/Appenders/ConsoleAppender.h>
+
+#include "fnd/ScopedCall.h"
 
 #include "lib/UniqueFile.h"
 #include "lib/book.h"
@@ -56,6 +60,9 @@ struct Archive
 using Archives    = std::vector<Archive>;
 using BookItem    = std::pair<QString, QString>;
 using Replacement = std::unordered_map<BookItem, BookItem, Util::PairHash<QString, QString>>;
+using UniquePaths = std::unordered_set<QString>;
+using InputDir    = std::pair<QDir, UniquePaths>;
+using InputDirs   = std::vector<InputDir>;
 
 struct Settings
 {
@@ -94,8 +101,8 @@ private:
 			if (const auto it = m_replacement.find(std::make_pair(m_folder, m_file)); it != m_replacement.end())
 			{
 				auto duplicates = m_writer.Guard("duplicates");
-				duplicates->WriteAttribute("folder", QFileInfo(it->second.first).completeBaseName());
-				duplicates->WriteAttribute("file", it->second.second);
+				duplicates->WriteAttribute(Inpx::FOLDER, QFileInfo(it->second.first).completeBaseName());
+				duplicates->WriteAttribute(Inpx::FILE, it->second.second);
 			}
 			m_file.clear();
 		}
@@ -187,7 +194,7 @@ void ProcessArchive(const QDir& outputDir, const Archive& archive, const Replace
 	Util::Remove::RemoveFiles(allFiles, outputDir.absolutePath());
 }
 
-void ProcessArchives(const QDir& outputDir, const Archives& archives, const Replacement& replacement)
+void MergeArchives(const QDir& outputDir, const Archives& archives, const Replacement& replacement)
 {
 	for (const auto& archive : archives)
 		ProcessArchive(outputDir, archive, replacement);
@@ -195,6 +202,7 @@ void ProcessArchives(const QDir& outputDir, const Archives& archives, const Repl
 
 void ProcessHash(const QDir& outputDir, const Archive& archive, const Replacement& replacement)
 {
+	PLOGI << "parsing " << archive.hashPath;
 	outputDir.mkpath("hash");
 	QFileInfo fileInfo(archive.hashPath);
 
@@ -211,7 +219,7 @@ void ProcessHash(const QDir& outputDir, const Archive& archive, const Replacemen
 	HashCopier parser(input, output, QFileInfo(archive.filePath).fileName(), replacement);
 }
 
-void ProcessHash(const QDir& outputDir, const Archives& archives, const Replacement& replacement)
+void MergeHash(const QDir& outputDir, const Archives& archives, const Replacement& replacement)
 {
 	for (const auto& archive : archives)
 		ProcessHash(outputDir, archive, replacement);
@@ -274,12 +282,6 @@ void GetReplacement(const Archive& archive, UniqueFileStorage& uniqueFileStorage
 					.images   = std::move(imageItems)
             }
 			);
-
-			//			if (uniqueFile)
-			//				return;
-
-			//			auto& replacedWith = uniqueFile.error();
-			//			replacement.try_emplace(std::make_pair(fileInfo.fileName(), std::move(file)), std::make_pair(std::move(replacedWith.first), std::move(replacedWith.second)));
 		}
 	);
 }
@@ -333,12 +335,16 @@ Archives GetArchives(const Settings& settings)
 	return std::move(sorted) | std::views::values | std::views::reverse | std::ranges::to<Archives>();
 }
 
-QDateTime ProcessInpx(IZipFileController& zipFiles, const QString& inpxFilePath, const Replacement& replacement)
+QDateTime ProcessInpx(IZipFileController& zipFiles, const QString& inpxFilePath, const UniquePaths& inputPaths, const Replacement& replacement)
 {
+	const auto inputInpFiles = inputPaths | std::views::transform([](const QString& item) {
+								   return QFileInfo(item).completeBaseName().toLower() + ".inp";
+							   })
+	                         | std::ranges::to<UniquePaths>();
 	auto maxDateTime = QDateTime::fromSecsSinceEpoch(0);
 	Zip  zip(inpxFilePath);
-	for (const auto& inpFileName : zip.GetFileNameList() | std::views::filter([](const QString& item) {
-									   return item.endsWith(".inp");
+	for (const auto& inpFileName : zip.GetFileNameList() | std::views::filter([&](const QString& item) {
+									   return item.endsWith(".inp") && inputInpFiles.contains(item.toLower());
 								   }))
 	{
 		QByteArray bytes;
@@ -372,23 +378,14 @@ QDateTime ProcessInpx(IZipFileController& zipFiles, const QString& inpxFilePath,
 	return maxDateTime;
 }
 
-void ProcessInpx(const Settings& settings, const Archives& archives, const Replacement& replacement)
+void MergeInpx(const Settings& settings, const InputDirs& inputDirs, const Replacement& replacement)
 {
 	auto zipFiles    = Zip::CreateZipFileController();
 	auto maxDateTime = QDateTime::fromSecsSinceEpoch(0);
 
-	std::unordered_set<QString> uniqueFolders;
-	for (const auto& folder : archives | std::views::transform([](const Archive& item) {
-								  return QFileInfo(item.filePath).dir();
-							  }) | std::views::filter([&](const QDir& item) {
-								  auto       path   = item.absolutePath().toLower();
-								  const auto result = !uniqueFolders.contains(path);
-								  if (result)
-									  uniqueFolders.emplace(std::move(path));
-								  return result;
-							  }))
-		for (const auto& inpx : folder.entryList({ "*.inpx" }, QDir::Files))
-			if (auto inpxFileDateTime = ProcessInpx(*zipFiles, folder.absoluteFilePath(inpx), replacement); maxDateTime < inpxFileDateTime)
+	for (const auto& [inputDir, inputPaths] : inputDirs)
+		for (const auto& inpx : inputDir.entryList({ "*.inpx" }, QDir::Files))
+			if (auto inpxFileDateTime = ProcessInpx(*zipFiles, inputDir.absoluteFilePath(inpx), inputPaths, replacement); maxDateTime < inpxFileDateTime)
 				maxDateTime = std::move(inpxFileDateTime);
 
 	const auto outputZipFilePath = settings.outputDir.absoluteFilePath(settings.outputDir.dirName() + ".inpx");
@@ -412,6 +409,157 @@ void ProcessInpx(const Settings& settings, const Archives& archives, const Repla
 
 	PLOGI << "archive inpx files: " << zipFiles->GetCount();
 	zip.Write(std::move(zipFiles));
+}
+
+void MergeReviews(const QDir& outputDir, const InputDirs& inputDirs, const Replacement& replacement)
+{
+	std::unordered_map<QString, std::vector<std::pair<QString, std::reference_wrapper<const UniquePaths>>>> reviews;
+	for (const auto& [inputDir, inputPaths] : inputDirs)
+		for (const auto reviewFolder = QDir(inputDir.absoluteFilePath(QString::fromStdWString(Inpx::REVIEWS_FOLDER))); const auto& reviewFile : reviewFolder.entryList({ "??????.7z" }, QDir::Files))
+			reviews[reviewFile].emplace_back(reviewFolder.absoluteFilePath(reviewFile), inputPaths);
+
+	for (auto&& [index, review] : std::views::zip(std::views::iota(1), reviews))
+	{
+		const auto& [fileName, reviewFiles] = review;
+		const ScopedCall logGuard([&] {
+			PLOGI << QString("process %1: %2 (%3) %4%").arg(fileName).arg(index).arg(reviews.size()).arg(static_cast<qsizetype>(index) * 100 / reviews.size());
+		});
+
+		std::unordered_map<QString, std::pair<std::vector<std::tuple<QString, QString, QString>>, QDateTime>> data;
+
+		const auto outputReviewFilePath = outputDir.absoluteFilePath(QString("%1/%2").arg(QString::fromStdWString(Inpx::REVIEWS_FOLDER), fileName));
+		QFile::remove(outputReviewFilePath);
+
+		for (const auto& [reviewFile, inputPaths] : reviewFiles)
+		{
+			const Zip zip(reviewFile);
+			for (const auto& reviewBookFile : zip.GetFileNameList())
+			{
+				QJsonParseError error;
+				const auto      doc = QJsonDocument::fromJson(zip.Read(reviewBookFile)->GetStream().readAll(), &error);
+				if (error.error != QJsonParseError::NoError || !doc.isArray())
+					throw std::ios_base::failure(std::format("bad json: {}/{}", reviewFile, reviewBookFile));
+
+				const auto splitted = reviewBookFile.split('#');
+				assert(splitted.size() == 2);
+				if (!inputPaths.get().contains(splitted.front()))
+					continue;
+
+				const auto it                = replacement.find(std::make_pair(splitted.front(), splitted.back()));
+				const auto dstReviewBookFile = it == replacement.end() ? reviewBookFile : QString("%1#%2").arg(it->second.first, it->second.second);
+				auto&      dstArray          = data[dstReviewBookFile];
+				for (const auto reviewValue : doc.array())
+				{
+					const auto reviewObj = reviewValue.toObject();
+					dstArray.first.emplace_back(reviewObj[Inpx::NAME].toString(), reviewObj[Inpx::TIME].toString(), reviewObj[Inpx::TEXT].toString());
+				}
+				if (auto dateTime = zip.GetFileTime(reviewBookFile); !dstArray.second.isValid() || dateTime > dstArray.second)
+					dstArray.second = std::move(dateTime);
+			}
+		}
+
+		auto zipFiles = Zip::CreateZipFileController();
+		for (auto&& [reviewBookFile, dstArray] : data)
+		{
+			QJsonArray fileData;
+			for (const auto& [name, time, text] : dstArray.first)
+				fileData.append(QJsonObject {
+					{ Inpx::NAME, name },
+					{ Inpx::TIME, time },
+					{ Inpx::TEXT, text },
+				});
+			zipFiles->AddFile(reviewBookFile, QJsonDocument(fileData).toJson(), std::move(dstArray.second));
+		}
+
+		Zip zip(outputReviewFilePath, Zip::Format::SevenZip);
+		zip.SetProperty(ZipDetails::PropertyId::SolidArchive, false);
+		zip.SetProperty(Zip::PropertyId::CompressionMethod, QVariant::fromValue(Zip::CompressionMethod::Ppmd));
+		zip.Write(std::move(zipFiles));
+	}
+}
+
+void MergeReviewsAdditional(const QDir& outputDir, const InputDirs& inputDirs, const Replacement& replacement)
+{
+	PLOGI << "process reviews additional";
+	const auto additionalFileName = QString::fromStdWString(Inpx::REVIEWS_FOLDER) + "/" + QString::fromStdWString(Inpx::REVIEWS_ADDITIONAL_ARCHIVE_NAME);
+	std::vector<std::pair<QString, std::reference_wrapper<const UniquePaths>>> reviewsAdditional;
+	for (const auto& [inputDir, inputPaths] : inputDirs)
+		if (auto reviewsAdditionalFile = inputDir.absoluteFilePath(additionalFileName); QFile::exists(reviewsAdditionalFile))
+			reviewsAdditional.emplace_back(std::move(reviewsAdditionalFile), inputPaths);
+
+	const auto outputReviewsAdditionalFilePath = outputDir.absoluteFilePath(additionalFileName);
+	QFile::remove(outputReviewsAdditionalFilePath);
+
+	std::unordered_map<BookItem, std::pair<double, int>, Util::PairHash<QString, QString>> additional;
+
+	auto maxDateTime = QDateTime::fromSecsSinceEpoch(0);
+
+	for (const auto& [reviewsAdditionalFile, inputPaths] : reviewsAdditional)
+	{
+		const Zip       zip(reviewsAdditionalFile);
+		QJsonParseError error;
+		const auto      doc = QJsonDocument::fromJson(zip.Read(Inpx::REVIEWS_ADDITIONAL_BOOKS_FILE_NAME)->GetStream().readAll(), &error);
+		if (error.error != QJsonParseError::NoError || !doc.isArray())
+			throw std::ios_base::failure(std::format("bad json: {}/{}", reviewsAdditionalFile, Inpx::REVIEWS_ADDITIONAL_BOOKS_FILE_NAME));
+
+		for (const auto reviewAdditionalValue : doc.array())
+		{
+			const auto obj = reviewAdditionalValue.toObject();
+			BookItem   book(obj[Inpx::FOLDER].toString(), obj[Inpx::FILE].toString());
+			if (const auto it = replacement.find(book); it != replacement.end())
+				book = it->second;
+
+			auto& value   = additional[book];
+			value.first  += obj[Inpx::SUM].toDouble(0.0);
+			value.second += obj[Inpx::COUNT].toInt(0);
+		}
+
+		maxDateTime = std::max(maxDateTime, zip.GetFileTime(Inpx::REVIEWS_ADDITIONAL_BOOKS_FILE_NAME));
+	}
+
+	QJsonArray additionalArray;
+	for (const auto& [book, value] : additional)
+		additionalArray.append(QJsonObject {
+			{ Inpx::FOLDER,   book.first },
+			{   Inpx::FILE,  book.second },
+			{    Inpx::SUM,  value.first },
+			{  Inpx::COUNT, value.second },
+		});
+
+	PLOGI << "write reviews additional";
+	Zip  zip(outputReviewsAdditionalFilePath, Zip::Format::Zip);
+	auto zipFiles = Zip::CreateZipFileController();
+	zipFiles->AddFile(Inpx::REVIEWS_ADDITIONAL_BOOKS_FILE_NAME, QJsonDocument(additionalArray).toJson(), std::move(maxDateTime));
+	zip.Write(std::move(zipFiles));
+}
+
+InputDirs GetInputFolders(const Archives& archives)
+{
+	UniquePaths                           uniquePaths;
+	std::unordered_map<QString, InputDir> unique;
+	std::vector<QDir>                     dirs;
+	for (auto&& [dir, path] : archives | std::views::transform([](const Archive& item) {
+								  return std::make_pair(QFileInfo(item.filePath).dir(), item.filePath);
+							  }))
+	{
+		auto& [uniqueDir, paths] = unique[dir.absolutePath().toLower()];
+		if (!paths.empty())
+			continue;
+
+		uniqueDir = std::move(dir);
+		std::ranges::move(
+			uniqueDir.entryList(QDir::Files) | std::views::filter([&](const auto& item) {
+				return !uniquePaths.contains(item);
+			}),
+			std::inserter(paths, paths.end())
+		);
+		std::ranges::copy(paths, std::inserter(uniquePaths, uniquePaths.end()));
+	}
+
+	InputDirs result;
+	std::ranges::move(unique | std::views::values, std::back_inserter(result));
+
+	return result;
 }
 
 Settings ProcessCommandLine(const QCoreApplication& app)
@@ -473,7 +621,8 @@ void run(int argc, char* argv[])
 	if (!settings.outputDir.exists() && !settings.outputDir.mkpath("."))
 		throw std::ios_base::failure(std::format("Cannot create folder {}", settings.outputDir.path()));
 
-	const auto archives = GetArchives(settings);
+	const auto archives  = GetArchives(settings);
+	const auto inputDirs = GetInputFolders(archives);
 
 	PLOGD << "Total file count calculation";
 	const auto totalFileCount = std::accumulate(archives.cbegin(), archives.cend(), size_t { 0 }, [](const size_t init, const Archive& archive) {
@@ -488,9 +637,13 @@ void run(int argc, char* argv[])
 	uniqueFileStorage.SetDuplicateObserver(std::make_unique<DuplicateObserver>(replacement));
 	GetReplacement(archives, uniqueFileStorage);
 
-	ProcessArchives(settings.outputDir, archives, replacement);
-	ProcessInpx(settings, archives, replacement);
-	ProcessHash(settings.outputDir, archives, replacement);
+	settings.outputDir.mkpath(QString::fromStdWString(Inpx::REVIEWS_FOLDER));
+	MergeReviews(settings.outputDir, inputDirs, replacement);
+	MergeReviewsAdditional(settings.outputDir, inputDirs, replacement);
+
+	MergeInpx(settings, inputDirs, replacement);
+	MergeArchives(settings.outputDir, archives, replacement);
+	MergeHash(settings.outputDir, archives, replacement);
 }
 
 } // namespace
