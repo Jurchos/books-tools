@@ -1,6 +1,7 @@
 #include "settings.h"
 
 using namespace HomeCompa::FliParser;
+using namespace HomeCompa;
 
 Book* Settings::FromFile(const QString& file) const
 {

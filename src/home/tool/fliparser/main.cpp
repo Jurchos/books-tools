@@ -21,6 +21,7 @@
 
 #include "db/Factory.h"
 #include "db/IDatabase.h"
+#include "lib/book.h"
 #include "logging/LogAppender.h"
 #include "logging/init.h"
 #include "util/Fb2InpxParser.h"
@@ -32,7 +33,6 @@
 #include "util/xml/XmlAttributes.h"
 
 #include "Constant.h"
-#include "book.h"
 #include "log.h"
 #include "settings.h"
 #include "util.h"
@@ -56,6 +56,8 @@ constexpr auto HASH                     = "hash";
 constexpr auto LIBRARY                  = "library";
 
 using InpData = std::unordered_map<QString, std::unique_ptr<Book>, Util::CaseInsensitiveHash<QString>>;
+
+constexpr auto APP_ID = "fliparser";
 
 class HashParser final : public Util::SaxParser
 {
@@ -133,8 +135,6 @@ private:
 	Section*     m_currentSection { m_section.get() };
 };
 
-constexpr auto APP_ID = "fliparser";
-
 struct FileInfo
 {
 	QByteArray hash;
@@ -205,7 +205,7 @@ Book* ParseBook(Settings& settings, const QString& fileName, InpData& inpData, c
 	const auto hash = GetFileHash(zip, fileName).hash;
 	PLOGV << "parse " << fileName << ", hash: " << hash;
 
-	auto parsedBook = Book::fromString(Util::Fb2InpxParser::Parse(folder, zip, fileName, zipDateTime, true));
+	auto parsedBook = Book::FromString(Util::Fb2InpxParser::Parse(folder, zip, fileName, zipDateTime, true));
 	if (parsedBook.title.isEmpty())
 		return nullptr;
 
@@ -306,8 +306,9 @@ void CreateInpx(Settings& settings, InpData& inpData, const QString& sourceLib)
 				book->sourceLib = sourceLib;
 
 				QFileInfo fileInfo(bookFile);
-				book->file = fileInfo.completeBaseName();
-				book->ext  = fileInfo.suffix();
+				book->file   = fileInfo.completeBaseName();
+				book->ext    = fileInfo.suffix();
+				book->folder = QString::fromStdWString(path.filename());
 
 				file << *book;
 
@@ -321,13 +322,16 @@ void CreateInpx(Settings& settings, InpData& inpData, const QString& sourceLib)
 	);
 
 	const auto collectionInfo = [&]() -> QString {
+		if (!QFile::exists(settings.collectionInfoTemplateFile))
+			return {};
+
 		if (QFile file(settings.collectionInfoTemplateFile); file.open(QIODevice::ReadOnly))
 			return QString::fromUtf8(file.readAll()).arg(maxTime.toString("yyyy-MM-dd"), maxTime.toString("yyyyMMdd"));
 
 		return {};
 	}();
 
-	zipFileController->AddFile(Inpx::STRUCTURE_INFO, "AUTHOR;GENRE;TITLE;SERIES;SERNO;FILE;SIZE;LIBID;DEL;EXT;DATE;LANG;LIBRATE;KEYWORDS;YEAR;SOURCELIB", QDateTime::currentDateTime());
+	zipFileController->AddFile(Inpx::STRUCTURE_INFO, Inpx::INP_FIELDS_DESCRIPTION, QDateTime::currentDateTime());
 	zipFileController->AddFile(QString::fromStdWString(Inpx::VERSION_INFO), maxTime.toString("yyyyMMdd").toUtf8(), QDateTime::currentDateTime());
 	if (!collectionInfo.isEmpty())
 		zipFileController->AddFile(QString::fromStdWString(Inpx::COLLECTION_INFO), collectionInfo.toUtf8(), QDateTime::currentDateTime());
@@ -340,30 +344,30 @@ void CreateInpx(Settings& settings, InpData& inpData, const QString& sourceLib)
 
 QByteArray CreateReviewAdditional(const Settings& settings)
 {
-	QJsonObject jsonObject;
+	QJsonArray jsonArray;
 	for (const auto& book : settings.hashToBook | std::views::values | std::views::filter([&](const Book* item) {
 								return item->rate > std::numeric_limits<double>::epsilon() && settings.fileToFolder.contains(item->file + "." + item->ext);
 							}))
 	{
-		jsonObject.insert(
-			book->libId,
-			QJsonObject {
-				{ "libRate", book->rate / book->rateCount }
-        }
-		);
+		jsonArray.append(QJsonObject {
+			{ Inpx::FOLDER,                 book->folder },
+			{   Inpx::FILE, book->file + '.' + book->ext },
+			{    Inpx::SUM,                   book->rate },
+			{  Inpx::COUNT,              book->rateCount },
+		});
 	}
 
-	if (jsonObject.isEmpty())
+	if (jsonArray.isEmpty())
 		return {};
 
-	return QJsonDocument(jsonObject).toJson();
+	return QJsonDocument(jsonArray).toJson();
 }
 
 std::vector<std::tuple<QString, QByteArray>> CreateReviewData(const IDatabase& db, const Settings& settings)
 {
 	auto threadPool = std::make_unique<Util::ThreadPool>();
 
-	const auto reviewsFolder = settings.outputFolder / Inpx::REVIEWS_FOLDER / db.GetName().toStdWString();
+	const auto reviewsFolder = settings.outputFolder / Inpx::REVIEWS_FOLDER;
 	QDir(reviewsFolder).mkpath(".");
 	int currentMonth { -1 };
 
@@ -479,7 +483,7 @@ std::vector<std::tuple<QString, QByteArray>> CreateReviewData(const IDatabase& d
 		if (const auto month = QStringView(time.begin(), std::next(time.begin(), 4)).toInt() * 100 + QStringView(std::next(time.begin(), 5), std::next(time.begin(), 7)).toInt(); month != currentMonth)
 			write(month);
 
-		data[book->libId].emplace_back(std::move(name), std::move(time), std::move(text));
+		data[book->GetUid()].emplace_back(std::move(name), std::move(time), std::move(text));
 	});
 
 	write(currentMonth);
@@ -601,9 +605,9 @@ void ProcessCompilations(Settings& settings)
 					continue;
 
 				found.append(QJsonObject {
-					{   "part",                      std::ssize(idFound) },
-					{ "folder",                 folderIt->second.front() },
-					{   "file", it->second->file + '.' + it->second->ext },
+					{   Inpx::PART,       std::ssize(idFound) },
+					{ Inpx::FOLDER,  folderIt->second.front() },
+					{   Inpx::FILE, it->second->GetFileName() },
 				});
 
 				idFound.emplace(id);
@@ -627,10 +631,10 @@ void ProcessCompilations(Settings& settings)
 		if (idFound.size() > 1)
 		{
 			QJsonObject compilation {
-				{      "folder",     folderIt->second.front() },
-				{        "file", book->file + '.' + book->ext },
-				{ "compilation",             std::move(found) },
-				{     "covered",           idNotFound.empty() },
+				{      Inpx::FOLDER, folderIt->second.front() },
+				{        Inpx::FILE,      book->GetFileName() },
+				{ Inpx::COMPILATION,         std::move(found) },
+				{     Inpx::COVERED,       idNotFound.empty() },
 			};
 			/*
 			if (!idNotFound.empty())
@@ -698,7 +702,7 @@ void ReadHash(Settings& settings, InpData& inpData)
 
 		PLOGI << "reading " << entryPath;
 
-		HashParser parser(stream, [&](QString file, QString duplicate, QString id, Section::Ptr section) {
+		const HashParser parser(stream, [&](QString file, QString duplicate, QString id, Section::Ptr section) {
 			sections.try_emplace(file, std::make_pair(std::move(id), std::move(section)));
 
 			auto it = [&] {

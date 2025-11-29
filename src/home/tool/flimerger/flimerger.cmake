@@ -1,4 +1,4 @@
-AddTarget(fb2cut	app_console
+AddTarget(flimerger	app_console
 	PROJECT_GROUP Tool
 	SOURCE_DIRECTORY
 		"${CMAKE_CURRENT_LIST_DIR}"
@@ -7,12 +7,8 @@ AddTarget(fb2cut	app_console
 		Qt${QT_MAJOR_VERSION}::Core
 		Qt${QT_MAJOR_VERSION}::Gui
 	LINK_TARGETS
-		flicu
-		fljxl
 		lib
 		logging
 		util
 		zip
-	QT_PLUGINS
-		qwindows
 )

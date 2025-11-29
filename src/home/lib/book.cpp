@@ -1,20 +1,23 @@
 #include "book.h"
 
+#include <ranges>
+
 #include <QStringList>
+
+#include "fnd/IsOneOf.h"
 
 #include "util/language.h"
 
-using namespace HomeCompa::FliParser;
 using namespace HomeCompa;
 
-Book Book::fromString(const QString& str)
+Book Book::FromString(const QString& str)
 {
 	if (str.isEmpty())
 		return {};
 
 	//"AUTHOR;GENRE;TITLE;SERIES;SERNO;FILE;SIZE;LIBID;DEL;EXT;DATE;LANG;LIBRATE;KEYWORDS;YEAR;"
 	auto l = str.split('\04');
-	assert(l.size() == 15);
+	assert(l.size() >= 15);
 	return Book {
 		.author    = std::move(l[0]),
 		.genre     = std::move(l[1]),
@@ -34,7 +37,17 @@ Book Book::fromString(const QString& str)
 	};
 }
 
-namespace HomeCompa::FliParser
+QString Book::GetFileName() const
+{
+	return QString("%1.%2").arg(file, ext);
+}
+
+QString Book::GetUid() const
+{
+	return QString("%1#%2").arg(folder, GetFileName());
+}
+
+namespace HomeCompa
 {
 
 QByteArray& operator<<(QByteArray& bytes, const Book& book)
@@ -86,4 +99,42 @@ QByteArray& operator<<(QByteArray& bytes, const Book& book)
 	return bytes;
 }
 
+QString& SimplifyTitle(QString& value)
+{
+	value.removeIf([](const QChar ch) {
+		return ch != ' ' && !IsOneOf(ch.category(), QChar::Number_DecimalDigit, QChar::Letter_Lowercase);
+	});
+
+	QStringList digits;
+	auto        split = value.split(' ');
+	for (auto& word : split)
+	{
+		QString digitsWord;
+		word.removeIf([&](const QChar ch) {
+			const auto c = ch.category();
+			if (c == QChar::Number_DecimalDigit)
+			{
+				digitsWord.append(ch);
+				return true;
+			}
+
+			return c != QChar::Letter_Lowercase;
+		});
+		if (!digitsWord.isEmpty())
+			digits << std::move(digitsWord);
+	}
+	std::ranges::move(std::move(digits), std::back_inserter(split));
+
+	return value;
 }
+
+QString& PrepareTitle(QString& value)
+{
+	value = value.toLower();
+	value.replace(QChar { 0x0451 }, QChar { 0x0435 });
+	value.replace(QChar { 0x0439 }, QChar { 0x0438 });
+	value.replace(QChar { 0x044A }, QChar { 0x044C });
+	return value;
+}
+
+} // namespace HomeCompa::FliParser

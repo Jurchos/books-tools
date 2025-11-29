@@ -6,6 +6,7 @@ AddTarget(fliparser	app_console
 		Qt${QT_MAJOR_VERSION}::Core
 	LINK_TARGETS
 		dbfactory
+		lib
 		logging
 		util
 		zip

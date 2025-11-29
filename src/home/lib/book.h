@@ -8,7 +8,11 @@
 
 #include <QString>
 
-namespace HomeCompa::FliParser
+#include "export/lib.h"
+
+class QIODevice;
+
+namespace HomeCompa
 {
 
 struct Series
@@ -47,11 +51,16 @@ struct Book
 	QString             sourceLib;
 
 	QString      id;
+	QString      folder;
 	Section::Ptr section;
 
-	static Book fromString(const QString& str);
+	LIB_EXPORT static Book FromString(const QString& str);
+	LIB_EXPORT QString     GetFileName() const;
+	LIB_EXPORT QString     GetUid() const;
 };
 
-QByteArray& operator<<(QByteArray& bytes, const Book& book);
+LIB_EXPORT QByteArray& operator<<(QByteArray& bytes, const Book& book);
+LIB_EXPORT QString&    SimplifyTitle(QString& value);
+LIB_EXPORT QString&    PrepareTitle(QString& value);
 
-} // namespace HomeCompa::FliParser
+} // namespace HomeCompa
