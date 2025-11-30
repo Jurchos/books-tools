@@ -15,13 +15,12 @@
 #include "util/language.h"
 
 #include "Constant.h"
-#include "IDatabase.h"
+#include "IDump.h"
 #include "log.h"
-#include "settings.h"
 #include "util.h"
 #include "zip.h"
 
-namespace HomeCompa::FliParser::Database
+namespace HomeCompa::FliLib::Dump
 {
 
 namespace
@@ -330,7 +329,7 @@ order by n.nid
 	return archives;
 }
 
-class Database final : public IDatabase
+class Dump final : public IDump
 {
 private: // IDatabase
 	const QString& GetName() const noexcept override
@@ -408,17 +407,17 @@ left join libfilename f on f.BookId=b.BookID
 			functor(query->Get<const char*>(0), query->Get<const char*>(1), query->Get<const char*>(2), query->Get<const char*>(3));
 	}
 
-	void CreateAdditional(const Settings& settings) const override
+	void CreateAdditional(const std::filesystem::path& sqlDir, const std::filesystem::path& dstDir) const override
 	{
-		CreateAuthorAnnotations(settings);
+		CreateAuthorAnnotations(sqlDir, dstDir);
 	}
 
 private:
-	void CreateAuthorAnnotations(const Settings& settings) const
+	void CreateAuthorAnnotations(const std::filesystem::path& sqlDir, const std::filesystem::path& dstDir) const
 	{
 		PLOGI << "write author annotations";
 
-		const auto authorsFolder = settings.outputFolder / Inpx::AUTHORS_FOLDER;
+		const auto authorsFolder = dstDir / Inpx::AUTHORS_FOLDER;
 		create_directory(authorsFolder);
 
 		const auto authorImagesFolder = authorsFolder / Global::PICTURES;
@@ -435,7 +434,7 @@ private:
 			Write(archiveName, data);
 		};
 
-		for (const auto& [id, annotation, images] : CreateAuthorAnnotationsData(*m_db, settings.sqlFolder))
+		for (const auto& [id, annotation, images] : CreateAuthorAnnotationsData(*m_db, sqlDir))
 		{
 			write(authorsFolder, id, ".7z", annotation);
 			write(authorImagesFolder, id, ".zip", images);
@@ -449,9 +448,9 @@ private:
 
 } // namespace
 
-std::unique_ptr<IDatabase> CreateFlibustaDatabase()
+std::unique_ptr<IDump> CreateFlibustaDatabase()
 {
-	return std::make_unique<Database>();
+	return std::make_unique<Dump>();
 }
 
 } // namespace HomeCompa::FliParser::Database

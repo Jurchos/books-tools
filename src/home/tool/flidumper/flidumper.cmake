@@ -1,12 +1,13 @@
-AddTarget(lib	shared_lib
-	PROJECT_GROUP Tool/Util
+AddTarget(flidumper	app_console
+	PROJECT_GROUP Tool
 	SOURCE_DIRECTORY
 		"${CMAKE_CURRENT_LIST_DIR}"
 	LINK_LIBRARIES
+		Boost::headers
 		Qt${QT_MAJOR_VERSION}::Core
 		Qt${QT_MAJOR_VERSION}::Gui
 	LINK_TARGETS
-		dbfactory
+		lib
 		logging
 		util
 		zip

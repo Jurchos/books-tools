@@ -12,7 +12,7 @@
 
 class QIODevice;
 
-namespace HomeCompa
+namespace HomeCompa::FliLib
 {
 
 struct Series

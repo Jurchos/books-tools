@@ -10,7 +10,7 @@
 
 #include "export/lib.h"
 
-namespace HomeCompa
+namespace HomeCompa::FliLib
 {
 
 struct LIB_EXPORT ImageItem

@@ -1,67 +1,12 @@
 #include "util.h"
 
-#include <fstream>
-#include <regex>
-
 #include <QFileInfo>
 #include <QRegularExpression>
 
-#include "database/interface/ICommand.h"
-#include "database/interface/IDatabase.h"
-#include "database/interface/ITransaction.h"
-
 #include "log.h"
 
-namespace HomeCompa::FliParser
+namespace HomeCompa::FliLib
 {
-
-void ReplaceStringInPlace(std::string& subject, const std::string& search, const std::string& replace)
-{
-	size_t pos = 0;
-	while ((pos = subject.find(search, pos)) != std::string::npos)
-	{
-		subject.replace(pos, search.length(), replace);
-		pos += replace.length();
-	}
-}
-
-void FillTables(DB::IDatabase& db, const std::filesystem::path& path)
-{
-	//	LOGI << path.string();
-
-	std::ifstream inp(path);
-	inp.seekg(0, std::ios_base::end);
-	const auto size = inp.tellg();
-	inp.seekg(0, std::ios_base::beg);
-
-	const auto  tr = db.CreateTransaction();
-	std::string line;
-
-	const std::regex escape(R"(\\(.))"), escapeBack("\x04(.)\x05");
-
-	int64_t currentPercents = 0;
-	while (std::getline(inp, line))
-	{
-		if (!line.starts_with("INSERT INTO"))
-			continue;
-
-		ReplaceStringInPlace(line, R"(\\\")", "\"");
-		ReplaceStringInPlace(line, R"(\r\n)", "\n");
-		ReplaceStringInPlace(line, R"(\\n)", "\n");
-		ReplaceStringInPlace(line, R"(\n)", "\n");
-		line = std::regex_replace(line, escape, "\x04$1\x05");
-		ReplaceStringInPlace(line, "\x04'\x05", "''");
-		line                           = std::regex_replace(line, escapeBack, "$1");
-		[[maybe_unused]] const auto ok = tr->CreateCommand(line)->Execute();
-		assert(ok);
-		if (const auto percents = 100 * inp.tellg() / size; percents != currentPercents)
-			LOGI << path.stem().string() << " " << (currentPercents = percents) << "%";
-	}
-
-	LOGI << path.stem().string() << " " << 100 << "%";
-
-	tr->Commit();
-}
 
 void Write(const QString& fileName, const QByteArray& data)
 {

@@ -1,10 +1,10 @@
 ﻿#include "database/interface/IDatabase.h"
 #include "database/interface/IQuery.h"
 
-#include "IDatabase.h"
+#include "IDump.h"
 #include "log.h"
 
-namespace HomeCompa::FliParser::Database
+namespace HomeCompa::FliLib::Dump
 {
 
 namespace
@@ -145,7 +145,7 @@ constexpr const char* g_indices[] {
 	"CREATE INDEX ix_libseqs_primary_key ON libseqs (sid)",
 };
 
-class Database final : public IDatabase
+class Dump final : public IDump
 {
 private: // IDatabase
 	const QString& GetName() const noexcept override
@@ -216,7 +216,7 @@ left join libseqs s on s.sid = ls.sid
 			functor(query->Get<const char*>(0), query->Get<const char*>(1), query->Get<const char*>(2), query->Get<const char*>(3));
 	}
 
-	void CreateAdditional(const Settings& /*settings*/) const override
+	void CreateAdditional(const std::filesystem::path& /*dstDir*/, const std::filesystem::path& /*sqlDir*/) const override
 	{
 	}
 
@@ -227,9 +227,9 @@ private:
 
 } // namespace
 
-std::unique_ptr<IDatabase> CreateRusEcDatabase()
+std::unique_ptr<IDump> CreateRusEcDatabase()
 {
-	return std::make_unique<Database>();
+	return std::make_unique<Dump>();
 }
 
 } // namespace HomeCompa::FliParser::Database

@@ -8,7 +8,7 @@
 
 #include "util/language.h"
 
-using namespace HomeCompa;
+using namespace HomeCompa::FliLib;
 
 Book Book::FromString(const QString& str)
 {
@@ -47,7 +47,7 @@ QString Book::GetUid() const
 	return QString("%1#%2").arg(folder, GetFileName());
 }
 
-namespace HomeCompa
+namespace HomeCompa::FliLib
 {
 
 QByteArray& operator<<(QByteArray& bytes, const Book& book)

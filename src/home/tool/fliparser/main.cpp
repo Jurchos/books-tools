@@ -19,9 +19,10 @@
 
 #include "database/interface/IQuery.h"
 
-#include "db/Factory.h"
-#include "db/IDatabase.h"
 #include "lib/book.h"
+#include "lib/dump/Factory.h"
+#include "lib/dump/IDump.h"
+#include "lib/util.h"
 #include "logging/LogAppender.h"
 #include "logging/init.h"
 #include "util/Fb2InpxParser.h"
@@ -34,13 +35,11 @@
 
 #include "Constant.h"
 #include "log.h"
-#include "settings.h"
-#include "util.h"
 #include "zip.h"
 
 #include "config/version.h"
 
-using namespace HomeCompa::FliParser;
+using namespace HomeCompa::FliLib;
 using namespace HomeCompa;
 
 namespace
@@ -58,6 +57,49 @@ constexpr auto LIBRARY                  = "library";
 using InpData = std::unordered_map<QString, std::unique_ptr<Book>, Util::CaseInsensitiveHash<QString>>;
 
 constexpr auto APP_ID = "fliparser";
+
+using FileToFolder = std::unordered_map<QString, QStringList>;
+
+struct Settings
+{
+	std::filesystem::path sqlFolder;
+	std::filesystem::path archivesFolder;
+	std::filesystem::path outputFolder;
+	std::filesystem::path collectionInfoTemplateFile;
+	std::filesystem::path hashFolder;
+
+	QString library;
+
+	std::unordered_map<QString, Book*>   hashToBook;
+	std::unordered_map<QString, QString> fileToHash;
+	std::unordered_map<QString, QString> libIdToHash;
+
+	FileToFolder fileToFolder;
+
+	[[nodiscard]] Book* FromFile(const QString& file) const
+	{
+		return From(fileToHash, file);
+	}
+
+	[[nodiscard]] Book* FromLibId(const QString& libId) const
+	{
+		return From(libIdToHash, libId);
+	}
+
+private:
+	[[nodiscard]] Book* From(const std::unordered_map<QString, QString>& map, const QString& id) const
+	{
+		const auto hashIt = map.find(id);
+		if (hashIt == map.end())
+			return nullptr;
+
+		const auto bookIt = hashToBook.find(hashIt->second);
+		if (bookIt == hashToBook.end())
+			return nullptr;
+
+		return bookIt->second;
+	}
+};
 
 class HashParser final : public Util::SaxParser
 {
@@ -363,7 +405,7 @@ QByteArray CreateReviewAdditional(const Settings& settings)
 	return QJsonDocument(jsonArray).toJson();
 }
 
-std::vector<std::tuple<QString, QByteArray>> CreateReviewData(const IDatabase& db, const Settings& settings)
+std::vector<std::tuple<QString, QByteArray>> CreateReviewData(const IDump& db, const Settings& settings)
 {
 	auto threadPool = std::make_unique<Util::ThreadPool>();
 
@@ -660,7 +702,7 @@ void ProcessCompilations(Settings& settings)
 	zip.Write(std::move(zipFiles));
 }
 
-void CreateReview(const Settings& settings, const IDatabase& db)
+void CreateReview(const Settings& settings, const IDump& db)
 {
 	PLOGI << "write reviews";
 
@@ -769,7 +811,7 @@ void ReadHash(Settings& settings, InpData& inpData)
 	}));
 }
 
-InpData CreateInpData(const IDatabase& db)
+InpData CreateInpData(const IDump& db)
 {
 	InpData inpData;
 
@@ -888,8 +930,9 @@ int main(int argc, char* argv[])
 	if (settings.sqlFolder.empty() || settings.archivesFolder.empty() || settings.outputFolder.empty())
 		parser.showHelp(1);
 
-	const auto db      = Database::Create(settings);
-	auto       inpData = CreateInpData(*db);
+	const auto db = Dump::Create(settings.sqlFolder, settings.outputFolder / (settings.archivesFolder.filename().wstring() + L".db"), settings.library);
+
+	auto inpData = CreateInpData(*db);
 	ReadHash(settings, inpData);
 
 	CreateInpx(settings, inpData, db->GetName());
@@ -897,7 +940,7 @@ int main(int argc, char* argv[])
 	CreateBookList(settings);
 
 	CreateReview(settings, *db);
-	db->CreateAdditional(settings);
+	db->CreateAdditional(settings.sqlFolder, settings.outputFolder);
 
 	return 0;
 }

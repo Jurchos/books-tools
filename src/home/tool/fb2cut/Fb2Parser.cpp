@@ -361,10 +361,10 @@ private: // Util::SaxParser
 
 		m_writer.WriteCharacters(valueCopy);
 
-		PrepareTitle(valueCopy);
+		FliLib::PrepareTitle(valueCopy);
 
 		if (path == TITLE)
-			return (m_title = SimplifyTitle(valueCopy)), true;
+			return (m_title = FliLib::SimplifyTitle(valueCopy)), true;
 
 		if (path.startsWith(BODY, Qt::CaseInsensitive) && !path.contains(SUBTITLE))
 		{

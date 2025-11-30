@@ -15,6 +15,7 @@
 
 #include "lib/UniqueFile.h"
 #include "lib/book.h"
+#include "lib/util.h"
 #include "logging/LogAppender.h"
 #include "logging/init.h"
 #include "util/BookUtil.h"
@@ -30,16 +31,8 @@
 
 #include "config/version.h"
 
+using namespace HomeCompa::FliLib;
 using namespace HomeCompa;
-
-template <>
-struct std::formatter<QString> : std::formatter<std::string>
-{
-	auto format(const QString& obj, std::format_context& ctx) const
-	{
-		return std::formatter<std::string>::format(obj.toStdString(), ctx);
-	}
-};
 
 namespace
 {

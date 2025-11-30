@@ -11,6 +11,7 @@
 
 #include "log.h"
 
+using namespace HomeCompa::FliLib;
 using namespace HomeCompa;
 
 namespace
@@ -368,13 +369,17 @@ UniqueFile* UniqueFileStorage::Add(QString hash, UniqueFile file)
 {
 	file.title.erase(m_si);
 
+	if (hash == "a79ea481b290bd2022c6a8765a000f48")
+	{
+		PLOGI << "here";
+	}
+
 	std::lock_guard lock(m_guard);
 
 	if (m_dstDir.isEmpty())
 		return &m_new.emplace(std::move(hash), std::make_pair(std::move(file), std::vector<UniqueFile> {}))->second.first;
 
 	const auto log = [&](const UniqueFile& old) {
-		m_duplicateObserver->OnDuplicateFound(file.uid, old.uid);
 		PLOGV << QString("duplicates detected: %1/%2 vs %3/%4, %5").arg(file.uid.folder, file.uid.file, old.uid.folder, old.uid.file, file.GetTitle());
 	};
 
@@ -405,6 +410,7 @@ UniqueFile* UniqueFileStorage::Add(QString hash, UniqueFile file)
 		}
 
 		log(it->second);
+		m_duplicateObserver->OnDuplicateFound(it->second.uid, file.uid);
 		m_dup.emplace_back(std::move(file), it->second).file.ClearImages();
 		return nullptr;
 	}
@@ -419,10 +425,12 @@ UniqueFile* UniqueFileStorage::Add(QString hash, UniqueFile file)
 
 		if (imagesCompareResult == UniqueFile::ImagesCompareResult::Outer || (imagesCompareResult == UniqueFile::ImagesCompareResult::Equal && it->second.first.order > file.order))
 		{
+			m_duplicateObserver->OnDuplicateFound(it->second.first.uid, file.uid);
 			it->second.second.emplace_back(std::move(file)).ClearImages();
 			return nullptr;
 		}
 
+		m_duplicateObserver->OnDuplicateFound(file.uid, it->second.first.uid);
 		it->second.second.emplace_back(std::move(it->second.first)).ClearImages();
 		it->second.first = std::move(file);
 		return &it->second.first;

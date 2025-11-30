@@ -43,8 +43,9 @@
 
 #include "config/version.h"
 
+using namespace HomeCompa::FliLib;
+using namespace HomeCompa::fb2cut;
 using namespace HomeCompa;
-using namespace fb2cut;
 
 namespace
 {
