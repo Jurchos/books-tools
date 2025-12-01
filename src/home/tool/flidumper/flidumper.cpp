@@ -48,9 +48,9 @@ void run(int argc, char* argv[])
 	parser.addHelpOption();
 	parser.addVersionOption();
 	parser.addOptions({
-		{    { "s", SQL }, "Folder with sql files (required)",                          FOLDER },
-		{ { "o", OUTPUT },  "Output database path (required)",                            PATH },
-		{         LIBRARY,						  "Library", "(Flibusta | RusEc) [Flibusta]" },
+		{    { "s", SQL }, "Folder with sql files (required)",                             FOLDER },
+		{ { "o", OUTPUT },  "Output database path (required)",                               PATH },
+		{         LIBRARY,						  "Library", "(Flibusta | LibRusEc) [Flibusta]" },
 	});
 	const auto defaultLogPath = QString("%1/%2.%3.log").arg(QStandardPaths::writableLocation(QStandardPaths::TempLocation), COMPANY_ID, APP_ID);
 	const auto logOption      = Log::LoggingInitializer::AddLogFileOption(parser, defaultLogPath);

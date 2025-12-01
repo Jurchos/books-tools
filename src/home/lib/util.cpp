@@ -3,6 +3,14 @@
 #include <QFileInfo>
 #include <QRegularExpression>
 
+#include "database/interface/IQuery.h"
+
+#include "dump/IDump.h"
+#include "util/Fb2InpxParser.h"
+#include "util/language.h"
+#include "util/xml/XmlWriter.h"
+
+#include "book.h"
 #include "log.h"
 
 namespace HomeCompa::FliLib
@@ -60,4 +68,119 @@ QString& ReplaceTags(QString& str)
 	return str;
 }
 
-} // namespace HomeCompa::FliParser
+InpData CreateInpData(const IDump& dump)
+{
+	InpData inpData;
+
+	size_t n = 0;
+	dump.CreateInpData([&](const DB::IQuery& query) {
+		QString libId = query.Get<const char*>(7);
+
+		QString type = query.Get<const char*>(9);
+		if (type != "fb2")
+			for (const auto* typoType : { "fd2", "fb", "???", "fb 2", "fbd" })
+				if (type == typoType)
+				{
+					type = "fb2";
+					break;
+				}
+
+		QString fileName = query.Get<const char*>(5);
+
+		auto index = fileName.isEmpty() ? libId + "." + type : fileName;
+
+		auto it = inpData.find(index);
+		if (it == inpData.end())
+		{
+			if (fileName.isEmpty())
+			{
+				fileName = libId;
+			}
+			else
+			{
+				QFileInfo fileInfo(fileName);
+				fileName = fileInfo.completeBaseName();
+				if (const auto ext = fileInfo.suffix().toLower(); ext == "fb2")
+					type = "fb2";
+			}
+
+			const auto* deleted = query.Get<const char*>(8);
+
+			it = inpData
+			         .try_emplace(
+						 std::move(index),
+						 std::make_unique<Book>(Book {
+							 .author    = query.Get<const char*>(0),
+							 .genre     = query.Get<const char*>(1),
+							 .title     = query.Get<const char*>(2),
+							 .file      = std::move(fileName),
+							 .size      = query.Get<const char*>(6),
+							 .libId     = std::move(libId),
+							 .deleted   = deleted && *deleted != '0',
+							 .ext       = std::move(type),
+							 .date      = QString::fromUtf8(query.Get<const char*>(10), 10),
+							 .lang      = QString::fromStdWString(GetLanguage(QString(query.Get<const char*>(11)).toLower().toStdWString())),
+							 .rate      = query.Get<double>(12),
+							 .rateCount = query.Get<int>(13),
+							 .keywords  = query.Get<const char*>(14),
+							 .year      = query.Get<const char*>(15),
+						 })
+					 )
+			         .first;
+		}
+
+		it->second->series.emplace_back(query.Get<const char*>(3), Util::Fb2InpxParser::GetSeqNumber(query.Get<const char*>(4)), query.Get<int>(16), query.Get<double>(17));
+
+		++n;
+		PLOGV_IF(n % 50000 == 0) << n << " records selected";
+	});
+
+	PLOGV << n << " total records selected";
+
+	for (auto& [_, book] : inpData)
+		std::ranges::sort(book->series, {}, [](const Series& item) {
+			return std::tuple(item.type, -item.level);
+		});
+
+	return inpData;
+}
+
+void SerializeHashSections(const QStringList& sections, Util::XmlWriter& writer)
+{
+	qsizetype depth = -1;
+	for (const auto& str : sections)
+	{
+		const auto split    = str.split('\t');
+		auto       newDepth = split.size() - 2;
+		const auto last     = split.rbegin();
+
+		const auto write = [&] {
+			writer.WriteStartElement("section").WriteAttribute("id", *std::next(last)).WriteAttribute("count", *last);
+		};
+
+		if (depth == newDepth)
+		{
+			writer.WriteEndElement();
+			write();
+			continue;
+		}
+
+		if (depth < newDepth)
+		{
+			write();
+			depth = newDepth;
+			continue;
+		}
+
+		writer.WriteEndElement();
+		for (; newDepth < depth; --depth)
+			writer.WriteEndElement();
+
+		write();
+	}
+
+	for (; depth >= 0; --depth)
+		writer.WriteEndElement();
+}
+
+} // namespace HomeCompa::FliLib

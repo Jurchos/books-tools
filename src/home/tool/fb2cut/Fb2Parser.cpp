@@ -36,16 +36,12 @@ constexpr auto L_HREF = "l:href";
 
 constexpr auto FICTION_BOOK    = "FictionBook";
 constexpr auto BINARY          = "FictionBook/binary";
-constexpr auto BODY            = "FictionBook/body";
 constexpr auto BODY_BINARY     = "FictionBook/body/binary";
 constexpr auto COVERPAGE_IMAGE = "FictionBook/description/title-info/coverpage/image";
 constexpr auto DESCRIPTION     = "FictionBook/description";
-constexpr auto TITLE           = "FictionBook/description/title-info/book-title";
 constexpr auto DOCUMENT_INFO   = "FictionBook/description/document-info";
 constexpr auto PROGRAM_USED    = "FictionBook/description/document-info/program-used";
 
-constexpr auto SECTION     = "section";
-constexpr auto SUBTITLE    = "title";
 constexpr auto CUSTOM_INFO = "custom-info";
 constexpr auto BR          = "br";
 
@@ -182,44 +178,6 @@ private:
 
 class Fb2ParserImpl final : public Util::SaxParser
 {
-	struct Section
-	{
-		Section* parent { nullptr };
-		int      depth { 0 };
-		size_t   size { 0 };
-
-		std::unordered_map<QString, size_t>   hist;
-		QString                               hash;
-		std::vector<std::unique_ptr<Section>> children;
-
-		void CalculateHash()
-		{
-			hash = GetHashImpl();
-			size = hist.size();
-			hist.clear();
-		}
-
-	private:
-		QString GetHashImpl() const
-		{
-			QCryptographicHash md5 { QCryptographicHash::Md5 };
-
-			std::set<std::pair<size_t, QString>, std::greater<>> counter;
-			std::ranges::transform(hist, std::inserter(counter, counter.begin()), [](const auto& item) {
-				return std::make_pair(item.second, item.first);
-			});
-
-			for (int n = 1; const auto& word : counter | std::views::values)
-			{
-				md5.addData(word.toUtf8());
-				if (++n > 10)
-					break;
-			}
-
-			return QString::fromUtf8(md5.result().toHex());
-		}
-	};
-
 public:
 	Fb2ParserImpl(QString fileName, QIODevice& input, QIODevice& output, const std::unordered_map<QString, int>& replaceId)
 		: SaxParser(input, 512)
@@ -231,22 +189,6 @@ public:
 		//		assert(m_tags.empty());
 		if (!m_tags.empty())
 			m_writer.WriteStartElement(QString::number(output.pos()));
-	}
-
-	Fb2Parser::ParseResult GetResult()
-	{
-		QStringList sections;
-		const auto  enumerate = [&](const Section& parent, const auto& r) -> void {
-            sections << QString("%1%2\t%3").arg(QString(parent.depth, '\t')).arg(parent.hash).arg(parent.size);
-
-            for (const auto& child : parent.children)
-                r(*child, r);
-		};
-
-		m_section.CalculateHash();
-		enumerate(m_section, enumerate);
-
-		return { .title = std::move(m_title), .hashText = std::move(m_section.hash), .hashSections = std::move(sections) };
 	}
 
 private: // Util::SaxParser
@@ -263,9 +205,6 @@ private: // Util::SaxParser
 
 		if (name == CUSTOM_INFO)
 			m_isCustomInfo = true;
-
-		if (name == SECTION)
-			m_currentSection = m_currentSection->children.emplace_back(std::make_unique<Section>(m_currentSection, m_currentSection->depth + 1)).get();
 
 		if (!m_isCustomInfo && !FB2_TAGS_CACHE.contains(name.toLower()))
 		{
@@ -306,13 +245,6 @@ private: // Util::SaxParser
 
 		if (name == CUSTOM_INFO)
 			m_isCustomInfo = false;
-
-		if (name == SECTION)
-		{
-			m_currentSection->CalculateHash();
-			m_currentSection = m_currentSection->parent;
-			assert(m_currentSection);
-		}
 
 		if (!m_isCustomInfo && !FB2_TAGS_CACHE.contains(name.toLower()))
 			return m_writer.WriteCharacters(">"), true;
@@ -360,27 +292,6 @@ private: // Util::SaxParser
 			valueCopy.replace(before, after, Qt::CaseInsensitive);
 
 		m_writer.WriteCharacters(valueCopy);
-
-		FliLib::PrepareTitle(valueCopy);
-
-		if (path == TITLE)
-			return (m_title = FliLib::SimplifyTitle(valueCopy)), true;
-
-		if (path.startsWith(BODY, Qt::CaseInsensitive) && !path.contains(SUBTITLE))
-		{
-			for (auto&& word : valueCopy.split(' ', Qt::SkipEmptyParts))
-			{
-				word.removeIf([](const QChar ch) {
-					return ch.category() != QChar::Letter_Lowercase;
-				});
-				if (word.length() > 5)
-				{
-					++m_section.hist[word];
-					for (auto* section = m_currentSection; section; section = section->parent)
-						++section->hist[word];
-				}
-			}
-		}
 
 		return true;
 	}
@@ -439,9 +350,6 @@ private:
 	bool                                    m_hasProgramUsed { false };
 	std::stack<QString>                     m_tags;
 	bool                                    m_isCustomInfo { false };
-	QString                                 m_title;
-	Section                                 m_section;
-	Section*                                m_currentSection { &m_section };
 };
 
 } // namespace
@@ -469,8 +377,7 @@ bool Fb2ImageParser::Parse(QIODevice& input, OnBinaryFound binaryCallback)
 	return false;
 }
 
-Fb2Parser::ParseResult Fb2Parser::Parse(QString fileName, QIODevice& input, QIODevice& output, const std::unordered_map<QString, int>& replaceId)
+void Fb2Parser::Parse(QString fileName, QIODevice& input, QIODevice& output, const std::unordered_map<QString, int>& replaceId)
 {
-	Fb2ParserImpl parser(std::move(fileName), input, output, replaceId);
-	return parser.GetResult();
+	[[maybe_unused]] Fb2ParserImpl parser(std::move(fileName), input, output, replaceId);
 }

@@ -19,7 +19,6 @@ struct LIB_EXPORT ImageItem
 	QByteArray body;
 	QDateTime  dateTime;
 	QString    hash;
-	QImage     image;
 
 	bool operator<(const ImageItem& rhs) const;
 };
@@ -64,6 +63,14 @@ public:
 		virtual void OnDuplicateFound(const UniqueFile::Uid& file, const UniqueFile::Uid& duplicate) = 0;
 	};
 
+	class IUniqueFileConflictResolver // NOLINT(cppcoreguidelines-special-member-functions)
+	{
+	public:
+		virtual ~IUniqueFileConflictResolver() = default;
+
+		virtual bool Resolve(const UniqueFile& file, const UniqueFile& duplicate) const = 0;
+	};
+
 public:
 	explicit UniqueFileStorage(QString dstDir);
 
@@ -74,11 +81,13 @@ public:
 	std::pair<ImageItems, ImageItems>         GetNewImages();
 	void                                      Save(const QString& folder, bool moveDuplicates);
 	void                                      SetDuplicateObserver(std::unique_ptr<IDuplicateObserver> duplicateObserver);
+	void                                      SetConflictResolver(std::unique_ptr<const IUniqueFileConflictResolver> conflictResolver);
 
 private:
-	const QString                       m_dstDir;
-	std::mutex                          m_guard;
-	std::unique_ptr<IDuplicateObserver> m_duplicateObserver;
+	const QString                                      m_hashDir;
+	std::mutex                                         m_guard;
+	std::unique_ptr<IDuplicateObserver>                m_duplicateObserver;
+	std::unique_ptr<const IUniqueFileConflictResolver> m_conflictResolver;
 
 	std::unordered_multimap<QString, UniqueFile> m_old;
 	std::vector<Dup>                             m_dup;

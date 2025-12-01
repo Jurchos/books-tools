@@ -24,7 +24,7 @@ namespace HomeCompa::FliLib::Dump
 
 #define LIBRARY_ITEMS_X_MACRO \
 	LIBRARY_ITEM(Flibusta)    \
-	LIBRARY_ITEM(RusEc)
+	LIBRARY_ITEM(LibRusEc)
 
 #define LIBRARY_ITEM(NAME) std::unique_ptr<IDump> Create##NAME##Database();
 LIBRARY_ITEMS_X_MACRO
@@ -164,4 +164,9 @@ std::unique_ptr<IDump> Create(const std::filesystem::path& sqlDir, const std::fi
 	return dump;
 }
 
-} // namespace HomeCompa::FliLib
+QStringList GetAvailableLibraries()
+{
+	return LIBRARIES | std::views::keys | std::ranges::to<QStringList>();
+}
+
+} // namespace HomeCompa::FliLib::Dump

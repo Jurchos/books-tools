@@ -227,7 +227,7 @@ private:
 
 } // namespace
 
-std::unique_ptr<IDump> CreateRusEcDatabase()
+std::unique_ptr<IDump> CreateLibRusEcDatabase()
 {
 	return std::make_unique<Dump>();
 }

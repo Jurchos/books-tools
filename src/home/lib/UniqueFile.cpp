@@ -10,6 +10,7 @@
 #include "util/xml/XmlWriter.h"
 
 #include "log.h"
+#include "util.h"
 
 using namespace HomeCompa::FliLib;
 using namespace HomeCompa;
@@ -149,40 +150,7 @@ private: // ISerializer
 		if (!origin.uid.file.isEmpty())
 			book->Guard("duplicates")->WriteAttribute("folder", origin.uid.folder).WriteAttribute("file", origin.uid.file);
 
-		qsizetype depth = -1;
-		for (const auto& str : file.hashSections)
-		{
-			const auto split    = str.split('\t');
-			auto       newDepth = split.size() - 2;
-			const auto last     = split.rbegin();
-
-			const auto write = [&] {
-				m_writer.WriteStartElement("section").WriteAttribute("id", *std::next(last)).WriteAttribute("count", *last);
-			};
-
-			if (depth == newDepth)
-			{
-				m_writer.WriteEndElement();
-				write();
-				continue;
-			}
-
-			if (depth < newDepth)
-			{
-				write();
-				depth = newDepth;
-				continue;
-			}
-
-			m_writer.WriteEndElement();
-			for (; newDepth < depth; --depth)
-				m_writer.WriteEndElement();
-
-			write();
-		}
-
-		for (; depth >= 0; --depth)
-			m_writer.WriteEndElement();
+		SerializeHashSections(file.hashSections, m_writer);
 	}
 
 private:
@@ -195,6 +163,14 @@ class DuplicateObserverStub final : public UniqueFileStorage::IDuplicateObserver
 {
 	void OnDuplicateFound(const UniqueFile::Uid&, const UniqueFile::Uid&) override
 	{
+	}
+};
+
+class UniqueFileConflictResolver final : public UniqueFileStorage::IUniqueFileConflictResolver
+{
+	bool Resolve(const UniqueFile& file, const UniqueFile& duplicate) const override
+	{
+		return file.order > duplicate.order;
 	}
 };
 
@@ -294,7 +270,6 @@ QString UniqueFile::GetTitle() const
 void UniqueFile::ClearImages()
 {
 	cover.body.clear();
-	cover.image = {};
 	decltype(images) tmp;
 	std::ranges::transform(images, std::inserter(tmp, tmp.end()), [](const auto& image) {
 		return ImageItem { .hash = image.hash };
@@ -303,14 +278,15 @@ void UniqueFile::ClearImages()
 }
 
 UniqueFileStorage::UniqueFileStorage(QString dstDir)
-	: m_dstDir { std::move(dstDir) }
+	: m_hashDir { std::move(dstDir) }
 	, m_duplicateObserver { std::make_unique<DuplicateObserverStub>() }
+	, m_conflictResolver { std::make_unique<UniqueFileConflictResolver>() }
 	, m_si { createSi() }
 {
-	if (m_dstDir.isEmpty())
+	if (m_hashDir.isEmpty())
 		return;
 
-	const QDir srcDir(QDir(m_dstDir).filePath("hash"));
+	const QDir srcDir(m_hashDir);
 	for (const auto& xml : srcDir.entryList({ "*.xml" }, QDir::Filter::Files))
 	{
 		PLOGV << "parsing " << xml;
@@ -337,8 +313,9 @@ UniqueFileStorage::UniqueFileStorage(QString dstDir)
 					.title    = { std::make_move_iterator(split.begin()), std::make_move_iterator(split.end()) },
 					.hashText = id,
 					.cover    = { .hash = std::move(cover) },
-					.images   = std::move(imageItems)
+					.images   = std::move(imageItems),
 				};
+				uniqueFile.order = QFileInfo(uniqueFile.uid.file).baseName().toInt();
 				m_old.emplace(std::move(id), std::move(uniqueFile));
 			}
 		);
@@ -373,26 +350,12 @@ UniqueFile* UniqueFileStorage::Add(QString hash, UniqueFile file)
 
 	std::lock_guard lock(m_guard);
 
-	if (m_dstDir.isEmpty())
+	if (m_hashDir.isEmpty())
 		return &m_new.emplace(std::move(hash), std::make_pair(std::move(file), std::vector<UniqueFile> {}))->second.first;
 
 	const auto log = [&](const UniqueFile& old) {
 		PLOGV << QString("duplicates detected: %1/%2 vs %3/%4, %5").arg(file.uid.folder, file.uid.file, old.uid.folder, old.uid.file, file.GetTitle());
 	};
-
-	if (const auto it = m_skip.find(std::make_pair(file.uid.folder, file.uid.file)); it != m_skip.end())
-	{
-		PLOGV << QString("%1/%2 skipped by %3/%4, %5").arg(file.uid.folder, file.uid.file, it->second.first, it->second.second, file.GetTitle());
-		m_dup
-			.emplace_back(
-				std::move(file),
-				UniqueFile {
-					.uid = { .folder = it->second.first, .file = it->second.second, }
-        }
-			)
-			.file.ClearImages();
-		return nullptr;
-	}
 
 	for (auto [it, end] = m_old.equal_range(hash); it != end; ++it)
 	{
@@ -400,7 +363,7 @@ UniqueFile* UniqueFileStorage::Add(QString hash, UniqueFile file)
 		if (imagesCompareResult == ImagesCompareResult::Varied)
 			continue;
 
-		if (imagesCompareResult == ImagesCompareResult::Inner)
+		if (imagesCompareResult == ImagesCompareResult::Inner || (imagesCompareResult == ImagesCompareResult::Equal && m_conflictResolver->Resolve(file, it->second)))
 		{
 			PLOGW << QString("old duplicate detected by %1/%2: %3/%4, %5").arg(file.uid.folder, file.uid.file, it->second.uid.folder, it->second.uid.file, file.GetTitle());
 			continue;
@@ -420,7 +383,7 @@ UniqueFile* UniqueFileStorage::Add(QString hash, UniqueFile file)
 
 		log(it->second.first);
 
-		if (imagesCompareResult == ImagesCompareResult::Outer || (imagesCompareResult == ImagesCompareResult::Equal && it->second.first.order > file.order))
+		if (imagesCompareResult == ImagesCompareResult::Outer || (imagesCompareResult == ImagesCompareResult::Equal && !m_conflictResolver->Resolve(file, it->second.first)))
 		{
 			m_duplicateObserver->OnDuplicateFound(it->second.first.uid, file.uid);
 			it->second.second.emplace_back(std::move(file)).ClearImages();
@@ -455,11 +418,11 @@ void UniqueFileStorage::Save(const QString& folder, const bool moveDuplicates)
 	if (m_new.empty() && m_dup.empty())
 		return;
 
-	if (m_dstDir.isEmpty())
+	if (m_hashDir.isEmpty())
 		return m_new.clear();
 
-	const QDir dstDir(m_dstDir);
-	const auto serializer = Serializer::Create(dstDir.filePath(QString("hash/%1.xml").arg(folder)));
+	const QDir dstDir(m_hashDir);
+	const auto serializer = Serializer::Create(dstDir.filePath(QString("%1.xml").arg(folder)));
 
 	const auto save = [&](UniqueFile& item, const UniqueFile& origin = {}) {
 		serializer->Serialize(item, origin);
@@ -508,6 +471,11 @@ void UniqueFileStorage::Save(const QString& folder, const bool moveDuplicates)
 void UniqueFileStorage::SetDuplicateObserver(std::unique_ptr<IDuplicateObserver> duplicateObserver)
 {
 	m_duplicateObserver = std::move(duplicateObserver);
+}
+
+void UniqueFileStorage::SetConflictResolver(std::unique_ptr<const IUniqueFileConflictResolver> conflictResolver)
+{
+	m_conflictResolver = std::move(conflictResolver);
 }
 
 void HashParser::Parse(QIODevice& input, Callback callback)

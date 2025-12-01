@@ -106,14 +106,7 @@ struct Fb2Parser
 		"col",
 	};
 
-	struct ParseResult
-	{
-		QString     title;
-		QString     hashText;
-		QStringList hashSections;
-	};
-
-	static ParseResult Parse(QString fileName, QIODevice& input, QIODevice& output, const std::unordered_map<QString, int>& replaceId);
+	static void Parse(QString fileName, QIODevice& input, QIODevice& output, const std::unordered_map<QString, int>& replaceId);
 };
 
 } // namespace HomeCompa::fb2cut
