@@ -3,7 +3,6 @@
 #include <unordered_set>
 
 #include <QCommandLineParser>
-#include <QDir>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -289,6 +288,9 @@ private:
 		QStringList images
 	) override
 	{
+		if (!originFolder.isEmpty())
+			return;
+
 		m_progress.Increment(1, file.toStdString());
 
 		decltype(UniqueFile::images) imageItems;

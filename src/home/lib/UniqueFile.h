@@ -36,11 +36,13 @@ struct LIB_EXPORT UniqueFile
 
 struct HashParser
 {
-#define HASH_PARSER_CALLBACK_ITEMS_X_MACRO \
-	HASH_PARSER_CALLBACK_ITEM(id)          \
-	HASH_PARSER_CALLBACK_ITEM(folder)      \
-	HASH_PARSER_CALLBACK_ITEM(file)        \
-	HASH_PARSER_CALLBACK_ITEM(title)
+#define HASH_PARSER_CALLBACK_ITEMS_X_MACRO  \
+	HASH_PARSER_CALLBACK_ITEM(id)           \
+	HASH_PARSER_CALLBACK_ITEM(folder)       \
+	HASH_PARSER_CALLBACK_ITEM(file)         \
+	HASH_PARSER_CALLBACK_ITEM(title)        \
+	HASH_PARSER_CALLBACK_ITEM(originFolder) \
+	HASH_PARSER_CALLBACK_ITEM(originFile)
 
 	class IObserver // NOLINT(cppcoreguidelines-special-member-functions)
 	{

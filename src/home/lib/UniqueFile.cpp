@@ -5,7 +5,6 @@
 #include <QDir>
 #include <QFile>
 
-#include "book.h"
 #include "dump/Factory.h"
 #include "dump/IDump.h"
 #include "util/files.h"
@@ -13,6 +12,8 @@
 #include "util/xml/XmlAttributes.h"
 #include "util/xml/XmlWriter.h"
 
+#include "Constant.h"
+#include "book.h"
 #include "log.h"
 #include "util.h"
 
@@ -53,11 +54,8 @@ private: // Util::SaxParser
 		}
 		else if (path == ORIGIN)
 		{
-#define HASH_PARSER_CALLBACK_ITEM(NAME) m_##NAME.clear();
-			HASH_PARSER_CALLBACK_ITEMS_X_MACRO
-#undef HASH_PARSER_CALLBACK_ITEM
-			m_cover.clear();
-			m_images.clear();
+			m_originFolder = attributes.GetAttribute(Inpx::FOLDER);
+			m_originFile   = attributes.GetAttribute(Inpx::FILE);
 		}
 
 		return true;
@@ -67,14 +65,14 @@ private: // Util::SaxParser
 	{
 		if (path == BOOK)
 		{
-			if (!m_id.isEmpty())
-				m_observer.OnBookParsed(
+			assert(!m_id.isEmpty());
+			m_observer.OnBookParsed(
 #define HASH_PARSER_CALLBACK_ITEM(NAME) std::move(m_##NAME),
-					HASH_PARSER_CALLBACK_ITEMS_X_MACRO
+				HASH_PARSER_CALLBACK_ITEMS_X_MACRO
 #undef HASH_PARSER_CALLBACK_ITEM
-						std::move(m_cover),
-					std::move(m_images)
-				);
+					std::move(m_cover),
+				std::move(m_images)
+			);
 
 #define HASH_PARSER_CALLBACK_ITEM(NAME) m_##NAME = {};
 			HASH_PARSER_CALLBACK_ITEMS_X_MACRO
@@ -529,6 +527,9 @@ void UniqueFileStorage::OnBookParsed(
 	QStringList images
 )
 {
+	if (!originFolder.isEmpty())
+		return;
+
 	decltype(UniqueFile::images) imageItems;
 	std::ranges::transform(std::move(images) | std::views::as_rvalue, std::inserter(imageItems, imageItems.end()), [](QString&& hash) {
 		return ImageItem { .hash = std::move(hash) };
