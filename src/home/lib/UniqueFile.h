@@ -69,15 +69,17 @@ public:
 	~InpDataProvider();
 
 public:
-	const InpData& GetInpData() const noexcept;
-	void           SetSourceLib(const QString& sourceLib);
+	const Book* GetBook(const UniqueFile::Uid& uid) const;
+	void        SetSourceLib(const QString& sourceLib);
+	void        SetFile(const UniqueFile::Uid& uid);
 
 private:
-	const InpData  m_stub;
-	const InpData* m_currentInpData { &m_stub };
+	InpData  m_stub;
+	InpData* m_currentInpData { &m_stub };
 
 	std::vector<std::pair<QString, std::unique_ptr<IDump>>> m_dumps;
 	std::vector<std::pair<QString, InpData>>                m_cache;
+	InpData                                                 m_data;
 };
 
 class LIB_EXPORT UniqueFileStorage final : HashParser::IObserver

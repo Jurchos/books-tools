@@ -296,9 +296,10 @@ InpDataProvider::InpDataProvider(const QString& dumpWildCards)
 
 InpDataProvider::~InpDataProvider() = default;
 
-const InpData& InpDataProvider::GetInpData() const noexcept
+const Book* InpDataProvider::GetBook(const UniqueFile::Uid& uid) const
 {
-	return *m_currentInpData;
+	const auto it = m_data.find(QString("%1#%2").arg(uid.folder, uid.file));
+	return it != m_data.end() ? it->second.get() : nullptr;
 }
 
 void InpDataProvider::SetSourceLib(const QString& sourceLib)
@@ -331,6 +332,13 @@ void InpDataProvider::SetSourceLib(const QString& sourceLib)
 	}
 
 	m_currentInpData = &m_stub;
+}
+
+void InpDataProvider::SetFile(const UniqueFile::Uid& uid)
+{
+	assert(m_currentInpData);
+	if (const auto it = m_currentInpData->find(uid.file); it != m_currentInpData->end())
+		m_data.try_emplace(QString("%1#%2").arg(uid.folder, uid.file), std::move(it->second));
 }
 
 UniqueFileStorage::UniqueFileStorage(QString dstDir, std::shared_ptr<InpDataProvider> inpDataProvider)
@@ -534,10 +542,13 @@ void UniqueFileStorage::OnBookParsed(
 	std::ranges::transform(std::move(images) | std::views::as_rvalue, std::inserter(imageItems, imageItems.end()), [](QString&& hash) {
 		return ImageItem { .hash = std::move(hash) };
 	});
-	const auto& inpData = m_inpDataProvider->GetInpData();
-	if (const auto it = inpData.find(file); it != inpData.end())
+
+	const UniqueFile::Uid uid { folder, file };
+	m_inpDataProvider->SetFile(uid);
+
+	if (const auto* book = m_inpDataProvider->GetBook(uid))
 	{
-		auto dumpTitle = it->second->title;
+		auto dumpTitle = book->title;
 		title          = SimplifyTitle(PrepareTitle(dumpTitle));
 	}
 	auto split = title.split(' ', Qt::SkipEmptyParts);
