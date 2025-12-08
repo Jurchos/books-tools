@@ -25,11 +25,12 @@ namespace
 
 class HashParserImpl final : public Util::SaxParser
 {
-	static constexpr auto BOOKS  = "books";
-	static constexpr auto BOOK   = "books/book";
-	static constexpr auto COVER  = "books/book/cover";
-	static constexpr auto IMAGE  = "books/book/image";
-	static constexpr auto ORIGIN = "books/book/origin";
+	static constexpr auto BOOKS   = "books";
+	static constexpr auto BOOK    = "books/book";
+	static constexpr auto COVER   = "books/book/cover";
+	static constexpr auto IMAGE   = "books/book/image";
+	static constexpr auto ORIGIN  = "books/book/origin";
+	static constexpr auto SECTION = "section";
 
 public:
 	HashParserImpl(QIODevice& input, HashParser::IObserver& observer)
@@ -40,28 +41,37 @@ public:
 	}
 
 private: // Util::SaxParser
-	bool OnStartElement(const QString& /*name*/, const QString& path, const Util::XmlAttributes& attributes) override
+	bool OnStartElement(const QString& name, const QString& path, const Util::XmlAttributes& attributes) override
 	{
 		if (path == BOOKS)
 		{
 			m_observer.OnParseStarted(attributes.GetAttribute("source"));
 		}
-		if (path == BOOK)
+		else if (path == BOOK)
 		{
 #define HASH_PARSER_CALLBACK_ITEM(NAME) m_##NAME = attributes.GetAttribute(#NAME);
 			HASH_PARSER_CALLBACK_ITEMS_X_MACRO
 #undef HASH_PARSER_CALLBACK_ITEM
+			m_section        = std::make_unique<Section>();
+			m_currentSection = m_section.get();
 		}
 		else if (path == ORIGIN)
 		{
 			m_originFolder = attributes.GetAttribute(Inpx::FOLDER);
 			m_originFile   = attributes.GetAttribute(Inpx::FILE);
 		}
+		else if (name == SECTION)
+		{
+			auto& section    = m_currentSection->children.try_emplace(attributes.GetAttribute("id"), std::make_unique<Section>()).first->second;
+			section->count   = attributes.GetAttribute("count").toULongLong();
+			section->parent  = m_currentSection;
+			m_currentSection = section.get();
+		}
 
 		return true;
 	}
 
-	bool OnEndElement(const QString& /*name*/, const QString& path) override
+	bool OnEndElement(const QString& name, const QString& path) override
 	{
 		if (path == BOOK)
 		{
@@ -71,15 +81,22 @@ private: // Util::SaxParser
 				HASH_PARSER_CALLBACK_ITEMS_X_MACRO
 #undef HASH_PARSER_CALLBACK_ITEM
 					std::move(m_cover),
-				std::move(m_images)
+				std::move(m_images),
+				std::move(m_section)
 			);
 
 #define HASH_PARSER_CALLBACK_ITEM(NAME) m_##NAME = {};
 			HASH_PARSER_CALLBACK_ITEMS_X_MACRO
 #undef HASH_PARSER_CALLBACK_ITEM
 
-			m_cover  = {};
-			m_images = {};
+			m_cover          = {};
+			m_images         = {};
+			m_section        = {};
+			m_currentSection = nullptr;
+		}
+		else if (name == SECTION)
+		{
+			m_currentSection = m_currentSection->parent;
 		}
 
 		return true;
@@ -100,8 +117,10 @@ private:
 	HASH_PARSER_CALLBACK_ITEMS_X_MACRO
 #undef HASH_PARSER_CALLBACK_ITEM
 
-	QString     m_cover;
-	QStringList m_images;
+	QString      m_cover;
+	QStringList  m_images;
+	Section::Ptr m_section;
+	Section*     m_currentSection;
 };
 
 class ISerializer // NOLINT(cppcoreguidelines-special-member-functions)
@@ -324,11 +343,32 @@ bool InpDataProvider::Enumerate(std::function<bool(const QString&, const IDump&)
 	});
 }
 
-void InpDataProvider::SetFile(const UniqueFile::Uid& uid)
+Book* InpDataProvider::AddBook(Book* book)
+{
+	return m_books.emplace_back(book);
+}
+
+Book* InpDataProvider::AddBook(std::unique_ptr<Book> book)
+{
+	auto  key    = book->GetUid();
+	auto& result = m_data.try_emplace(std::move(key), std::move(book)).first->second;
+	return m_books.emplace_back(result.get());
+}
+
+const std::vector<Book*>& InpDataProvider::Books() const noexcept
+{
+	return m_books;
+}
+
+void InpDataProvider::SetFile(const UniqueFile::Uid& uid, QString id)
 {
 	assert(m_currentInpData);
 	if (const auto it = m_currentInpData->find(uid.file); it != m_currentInpData->end())
-		m_data.try_emplace(QString("%1#%2").arg(uid.folder, uid.file), std::move(it->second));
+	{
+		assert(it->second);
+		auto& book = m_data.try_emplace(QString("%1#%2").arg(uid.folder, uid.file), std::move(it->second)).first->second;
+		book->id   = std::move(id);
+	}
 }
 
 UniqueFileStorage::UniqueFileStorage(QString dstDir, std::shared_ptr<InpDataProvider> inpDataProvider)
@@ -521,7 +561,8 @@ void UniqueFileStorage::OnBookParsed(
 	HASH_PARSER_CALLBACK_ITEMS_X_MACRO
 #undef HASH_PARSER_CALLBACK_ITEM
 		QString cover,
-	QStringList images
+	QStringList images,
+	Section::Ptr
 )
 {
 	if (!originFolder.isEmpty())
@@ -533,7 +574,7 @@ void UniqueFileStorage::OnBookParsed(
 	});
 
 	const UniqueFile::Uid uid { folder, file };
-	m_inpDataProvider->SetFile(uid);
+	m_inpDataProvider->SetFile(uid, id);
 
 	if (const auto* book = m_inpDataProvider->GetBook(uid))
 	{

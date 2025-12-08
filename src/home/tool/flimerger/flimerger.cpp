@@ -190,7 +190,8 @@ private:
 		HASH_PARSER_CALLBACK_ITEMS_X_MACRO
 #undef HASH_PARSER_CALLBACK_ITEM
 			QString cover,
-		QStringList images
+		QStringList images,
+		Section::Ptr
 	) override
 	{
 		if (!originFolder.isEmpty())
@@ -214,7 +215,7 @@ private:
 		auto hashText = id;
 
 		UniqueFile::Uid uid { .folder = m_fileInfo.fileName(), .file = file };
-		m_inpDataProvider.SetFile(uid);
+		m_inpDataProvider.SetFile(uid, id);
 
 		m_uniqueFileStorage.Add(
 			std::move(id),

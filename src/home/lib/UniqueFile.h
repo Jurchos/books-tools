@@ -6,6 +6,7 @@
 #include "fnd/algorithm.h"
 
 #include "ImageItem.h"
+#include "book.h"
 #include "util.h"
 
 #include "export/lib.h"
@@ -53,8 +54,9 @@ struct HashParser
 #define HASH_PARSER_CALLBACK_ITEM(NAME) QString NAME,
 			HASH_PARSER_CALLBACK_ITEMS_X_MACRO
 #undef HASH_PARSER_CALLBACK_ITEM
-				QString cover,
-			QStringList images
+				QString  cover,
+			QStringList  images,
+			Section::Ptr section
 		) = 0;
 	};
 
@@ -80,8 +82,12 @@ public:
 public:
 	Book* GetBook(const UniqueFile::Uid& uid) const;
 	void  SetSourceLib(const QString& sourceLib);
-	void  SetFile(const UniqueFile::Uid& uid);
+	void  SetFile(const UniqueFile::Uid& uid, QString id);
 	bool  Enumerate(std::function<bool(const QString&, const IDump&)> functor) const;
+	Book* AddBook(Book* book);
+	Book* AddBook(std::unique_ptr<Book> book);
+
+	const std::vector<Book*>& Books() const noexcept;
 
 private:
 	InpData  m_stub;
@@ -89,6 +95,7 @@ private:
 
 	std::vector<CacheItem> m_cache;
 	InpData                m_data;
+	std::vector<Book*>     m_books;
 };
 
 class LIB_EXPORT UniqueFileStorage final : HashParser::IObserver
@@ -134,8 +141,9 @@ private:
 #define HASH_PARSER_CALLBACK_ITEM(NAME) QString NAME,
 		HASH_PARSER_CALLBACK_ITEMS_X_MACRO
 #undef HASH_PARSER_CALLBACK_ITEM
-			QString cover,
-		QStringList images
+			QString  cover,
+		QStringList  images,
+		Section::Ptr section
 	) override;
 
 private:

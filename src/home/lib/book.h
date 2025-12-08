@@ -52,7 +52,6 @@ struct Book
 
 	QString      id;
 	QString      folder;
-	Section::Ptr section;
 
 	LIB_EXPORT static Book FromString(const QString& str);
 	LIB_EXPORT QString     GetFileName() const;
