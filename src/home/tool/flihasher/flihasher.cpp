@@ -17,6 +17,7 @@
 #include "logging/init.h"
 #include "util/LogConsoleFormatter.h"
 #include "util/files.h"
+#include "util/progress.h"
 #include "util/xml/Initializer.h"
 #include "util/xml/SaxParser.h"
 #include "util/xml/XmlWriter.h"
@@ -26,7 +27,6 @@
 #include "zip.h"
 
 #include "config/version.h"
-#include "util/progress.h"
 
 using namespace HomeCompa;
 
@@ -199,6 +199,7 @@ QStringList GetImageHashes(const Zip& zip, const std::set<QString>& imageFiles, 
 			return GetHash(zip, item, md5);
 		}
 	);
+	std::ranges::sort(result);
 	return result;
 }
 
