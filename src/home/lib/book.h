@@ -50,8 +50,8 @@ struct Book
 	QString             year;
 	QString             sourceLib;
 
-	QString      id;
-	QString      folder;
+	QString id;
+	QString folder;
 
 	LIB_EXPORT static Book FromString(const QString& str);
 	LIB_EXPORT QString     GetFileName() const;
@@ -62,4 +62,4 @@ LIB_EXPORT QByteArray& operator<<(QByteArray& bytes, const Book& book);
 LIB_EXPORT QString&    SimplifyTitle(QString& value);
 LIB_EXPORT QString&    PrepareTitle(QString& value);
 
-} // namespace HomeCompa
+} // namespace HomeCompa::FliLib

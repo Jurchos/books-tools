@@ -137,4 +137,4 @@ QString& PrepareTitle(QString& value)
 	return value;
 }
 
-} // namespace HomeCompa::FliParser
+} // namespace HomeCompa::FliLib
