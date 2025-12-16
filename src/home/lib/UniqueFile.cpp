@@ -434,7 +434,7 @@ UniqueFile* UniqueFileStorage::Add(QString hash, UniqueFile file)
 		if (imagesCompareResult == ImagesCompareResult::Varied)
 			continue;
 
-		if (imagesCompareResult == ImagesCompareResult::Inner || (imagesCompareResult == ImagesCompareResult::Equal && m_conflictResolver->Resolve(file, it->second)))
+		if (imagesCompareResult == ImagesCompareResult::Inner || (imagesCompareResult == ImagesCompareResult::Equal && file.hash != it->second.hash && m_conflictResolver->Resolve(file, it->second)))
 		{
 			PLOGW << QString("old duplicate detected by %1/%2: %3/%4, %5").arg(file.uid.folder, file.uid.file, it->second.uid.folder, it->second.uid.file, file.GetTitle());
 			continue;
