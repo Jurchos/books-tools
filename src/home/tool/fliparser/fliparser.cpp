@@ -165,19 +165,19 @@ private: // HashParser::IObserver
 			return;
 
 		const auto enumerate = [this](const Book* book, const Section& parent, QJsonArray& found, std::unordered_set<QString>& idNotFound, std::unordered_set<QString>& idFound, const auto& r) -> void {
-			for (const auto& [hash, child] : parent.children)
+			for (const auto& [childId, child] : parent.children)
 			{
 				if (child->count < 100)
 					continue;
 
-				if (hash == book->id)
+				if (childId == book->id)
 					return r(book, *child, found, idNotFound, idFound, r);
 
-				auto [it, end] = m_sectionToBook.equal_range(hash);
+				auto [it, end] = m_sectionToBook.equal_range(childId);
 				if (it == end)
 				{
 					if (child->children.empty())
-						idNotFound.insert(hash);
+						idNotFound.insert(childId);
 					else
 						r(book, *child, found, idNotFound, idFound, r);
 					continue;
@@ -191,7 +191,7 @@ private: // HashParser::IObserver
 						{   Inpx::FILE, it->second->GetFileName() },
 					});
 
-					idFound.emplace(hash);
+					idFound.emplace(childId);
 					child->children.clear();
 				}
 

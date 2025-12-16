@@ -120,7 +120,7 @@ private:
 	QString      m_cover;
 	QStringList  m_images;
 	Section::Ptr m_section;
-	Section*     m_currentSection;
+	Section*     m_currentSection { nullptr };
 };
 
 class ISerializer // NOLINT(cppcoreguidelines-special-member-functions)
@@ -569,8 +569,8 @@ void UniqueFileStorage::OnBookParsed(
 		return;
 
 	decltype(UniqueFile::images) imageItems;
-	std::ranges::transform(std::move(images) | std::views::as_rvalue, std::inserter(imageItems, imageItems.end()), [](QString&& hash) {
-		return ImageItem { .hash = std::move(hash) };
+	std::ranges::transform(std::move(images) | std::views::as_rvalue, std::inserter(imageItems, imageItems.end()), [](QString&& item) {
+		return ImageItem { .hash = std::move(item) };
 	});
 
 	const UniqueFile::Uid uid { folder, file };
@@ -585,6 +585,7 @@ void UniqueFileStorage::OnBookParsed(
 
 	UniqueFile uniqueFile {
 		.uid      = { .folder = std::move(folder), .file = std::move(file) },
+		.hash     = std::move(hash),
 		.title    = { std::make_move_iterator(split.begin()), std::make_move_iterator(split.end()) },
 		.hashText = id,
 		.cover    = { .hash = std::move(cover) },

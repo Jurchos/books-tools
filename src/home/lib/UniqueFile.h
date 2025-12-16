@@ -23,6 +23,7 @@ struct LIB_EXPORT UniqueFile
 	};
 
 	Uid                 uid;
+	QString             hash;
 	std::set<QString>   title;
 	QString             hashText;
 	QStringList         hashSections;
@@ -39,6 +40,7 @@ struct HashParser
 {
 #define HASH_PARSER_CALLBACK_ITEMS_X_MACRO  \
 	HASH_PARSER_CALLBACK_ITEM(id)           \
+	HASH_PARSER_CALLBACK_ITEM(hash)         \
 	HASH_PARSER_CALLBACK_ITEM(folder)       \
 	HASH_PARSER_CALLBACK_ITEM(file)         \
 	HASH_PARSER_CALLBACK_ITEM(title)        \

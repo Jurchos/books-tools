@@ -200,8 +200,8 @@ private:
 		m_progress.Increment(1, file.toStdString());
 
 		decltype(UniqueFile::images) imageItems;
-		std::ranges::transform(std::move(images) | std::views::as_rvalue, std::inserter(imageItems, imageItems.end()), [](QString&& hash) {
-			return ImageItem { .hash = std::move(hash) };
+		std::ranges::transform(std::move(images) | std::views::as_rvalue, std::inserter(imageItems, imageItems.end()), [](QString&& item) {
+			return ImageItem { .hash = std::move(item) };
 		});
 
 		if (!m_bookFiles.contains(file))
@@ -221,6 +221,7 @@ private:
 			std::move(id),
 			UniqueFile {
 				.uid      = std::move(uid),
+				.hash     = std::move(hash),
 				.title    = { std::make_move_iterator(split.begin()), std::make_move_iterator(split.end()) },
 				.hashText = std::move(hashText),
 				.cover    = { .hash = std::move(cover) },
