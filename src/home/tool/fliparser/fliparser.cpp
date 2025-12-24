@@ -507,6 +507,7 @@ std::vector<std::tuple<QString, QByteArray>> CreateReviewData(const std::filesys
 		});
 	};
 
+	PLOGI << "Creating LibID to book index";
 	const auto libIdToBook = inpDataProvider.Books() | std::views::transform([](const Book* book) {
 								 return std::make_pair(std::make_pair(book->libId, book->sourceLib.toLower()), book);
 							 })
