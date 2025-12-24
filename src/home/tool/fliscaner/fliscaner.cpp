@@ -111,8 +111,8 @@ bool Validate(const QString& path, const QString& ext)
 	using namespace std::literals;
 	static constexpr auto                                                      empty = "";
 	static constexpr std::pair<const char* /*ext*/, std::string_view /*sign*/> signatures[] {
-		{ "zip", "PK\x03\x04\x14\x00\x00\x00"sv },
-		{  "gz",           "\x1F\x8B\x08\x00"sv },
+		{ "zip",       "PK\x03\x04"sv },
+		{  "gz", "\x1F\x8B\x08\x00"sv },
 	};
 	const QFileInfo fileInfo(path);
 	const auto      signature = FindSecond(signatures, ext.toStdString().data(), empty, PszComparer {});
