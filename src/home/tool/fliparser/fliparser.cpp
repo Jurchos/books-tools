@@ -72,11 +72,10 @@ struct FileInfo
 class FileHashParser final : HashParser::IObserver
 {
 public:
-	FileHashParser(Archive& archive, InpDataProvider& inpDataProvider, Replacement& replacement, Util::Progress& progress)
+	FileHashParser(Archive& archive, InpDataProvider& inpDataProvider, Replacement& replacement)
 		: m_sourceLib { archive.sourceLib }
 		, m_inpDataProvider { inpDataProvider }
 		, m_replacement { replacement }
-		, m_progress { progress }
 	{
 		QFile file(archive.hashPath);
 		if (!file.open(QIODevice::ReadOnly))
@@ -102,29 +101,27 @@ private: // HashParser::IObserver
 	{
 		UniqueFile::Uid uid { folder, file };
 		if (!originFolder.isEmpty())
-			return (void)m_replacement.try_emplace(std::make_pair(std::move(uid.file), std::move(uid.file)), std::make_pair(std::move(originFolder), std::move(originFile)));
+			m_replacement.try_emplace(std::make_pair(uid.folder, uid.file), std::make_pair(std::move(originFolder), std::move(originFile)));
 
 		m_inpDataProvider.SetFile(uid, std::move(id));
-		m_progress.Increment(1, file.toStdString());
 	}
 
 private:
 	QString&         m_sourceLib;
 	InpDataProvider& m_inpDataProvider;
 	Replacement&     m_replacement;
-	Util::Progress&  m_progress;
 };
 
 class CompilationHandler final : HashParser::IObserver
 {
 public:
-	CompilationHandler(const size_t totalFileCount, const Archives& archives, const InpDataProvider& inpDataProvider)
+	CompilationHandler(const Archives& archives, const InpDataProvider& inpDataProvider)
 		: m_inpDataProvider { inpDataProvider }
 		, m_sectionToBook { m_inpDataProvider.Books() | std::views::transform([](Book* book) {
 								return std::make_pair(book->id, book);
 							})
 		                    | std::ranges::to<std::unordered_multimap<QString, Book*>>() }
-		, m_progress { totalFileCount, "compilations" }
+		, m_progress { archives.size(), "compilations" }
 	{
 		if (m_sectionToBook.empty())
 			return;
@@ -135,6 +132,7 @@ public:
 			if (!file.open(QIODevice::ReadOnly))
 				throw std::invalid_argument(std::format("Cannot read from {}", archive.hashPath));
 			HashParser::Parse(file, *this);
+			m_progress.Increment(1, QFileInfo(archive.hashPath).fileName().toStdString());
 		}
 	}
 
@@ -226,8 +224,6 @@ private: // HashParser::IObserver
 
 			m_compilations.append(std::move(compilation));
 		}
-
-		m_progress.Increment(1, file.toStdString());
 	}
 
 private:
@@ -611,10 +607,10 @@ void CreateBookList(const std::filesystem::path& outputFolder, const InpDataProv
 	zip.Write(std::move(zipFiles));
 }
 
-void ProcessCompilations(const std::filesystem::path& outputFolder, const size_t totalFileCount, const Archives& archives, const InpDataProvider& inpDataProvider)
+void ProcessCompilations(const std::filesystem::path& outputFolder, const Archives& archives, const InpDataProvider& inpDataProvider)
 {
 	PLOGI << "collect compilation info";
-	const CompilationHandler compilationHandler(totalFileCount, archives, inpDataProvider);
+	const CompilationHandler compilationHandler(archives, inpDataProvider);
 	auto                     data = compilationHandler.GetResult();
 	if (data.isEmpty())
 		return;
@@ -639,28 +635,72 @@ void CreateReview(const std::filesystem::path& outputFolder, const InpDataProvid
 		Write(fileName, data);
 }
 
-Replacement ReadHash(const size_t totalFileCount, InpDataProvider& inpDataProvider, Archives& archives)
+Replacement ReadHash(InpDataProvider& inpDataProvider, Archives& archives)
 {
 	Replacement    replacement;
-	Util::Progress progress(totalFileCount, "parsing");
+	Util::Progress progress(archives.size(), "parsing");
 
 	for (auto& archive : archives)
-		FileHashParser(archive, inpDataProvider, replacement, progress);
+	{
+		const FileHashParser parser(archive, inpDataProvider, replacement);
+		progress.Increment(1, QFileInfo(archive.hashPath).fileName().toStdString());
+	}
 
 	return replacement;
 }
 
-void MergeRate(const InpDataProvider& inpDataProvider, const Replacement& replacement)
+void MergeBookData(const InpDataProvider& inpDataProvider, const Replacement& replacement)
 {
+	struct BookIndexItem
+	{
+		BookItem                    uid;
+		std::vector<BookIndexItem*> children;
+	};
+
+	std::unordered_map<BookItem, BookIndexItem, Util::PairHash<QString, QString>> index;
 	for (const auto& [fileUid, originUid] : replacement)
 	{
-		if (const auto* file = inpDataProvider.GetBook({ fileUid.first, fileUid.second }))
+		auto& origin = index.try_emplace(originUid, BookIndexItem { originUid }).first->second;
+		auto& file   = index.try_emplace(fileUid, BookIndexItem { fileUid }).first->second;
+		origin.children.emplace_back(&file);
+	}
+
+	const auto enumerate = [&](Book& origin, const BookIndexItem& parent, const auto& r) -> void {
+		for (const auto* item : parent.children)
 		{
-			if (auto* origin = inpDataProvider.GetBook({ originUid.first, originUid.second }))
+			if (const auto* file = inpDataProvider.GetBook({ item->uid.first, item->uid.second }))
 			{
-				origin->rate      += file->rate;
-				origin->rateCount += file->rateCount;
+				origin.rate      += file->rate;
+				origin.rateCount += file->rateCount;
+
+				std::ranges::copy(file->series, std::back_inserter(origin.series));
+
+				origin.deleted = origin.deleted && file->deleted;
 			}
+			r(origin, *item, r);
+		}
+	};
+
+	const auto seriesUniquePredicate = [](const auto& item) {
+		return item.title;
+	};
+	const auto seriesOrdNumPredicate = [](const auto& item) {
+		return item.level;
+	};
+
+	for (const auto& indexItem : index | std::views::filter([&](const auto& item) {
+									 return !replacement.contains(item.first);
+								 }) | std::views::values)
+	{
+		if (auto* origin = inpDataProvider.GetBook({ indexItem.uid.first, indexItem.uid.second }))
+		{
+			enumerate(*origin, indexItem, enumerate);
+			std::ranges::sort(origin->series, std::greater {}, seriesUniquePredicate);
+			if (const auto [begin, end] = std::ranges::unique(origin->series, {}, seriesUniquePredicate); begin != end)
+				origin->series.erase(begin, end);
+			if (origin->series.size() > 1 && origin->series.back().title.isEmpty())
+				origin->series.pop_back();
+			std::ranges::sort(origin->series, {}, seriesOrdNumPredicate);
 		}
 	}
 }
@@ -700,16 +740,17 @@ int main(int argc, char* argv[])
 	settings.outputFolder               = parser.value(OUTPUT).toStdWString();
 	settings.collectionInfoTemplateFile = parser.value(COLLECTION_INFO_TEMPLATE).toStdWString();
 
-	auto       archives        = GetArchives(parser.positionalArguments());
-	const auto totalFileCount  = Total(archives);
-	const auto inpDataProvider = std::make_shared<InpDataProvider>(parser.value(DUMP));
-	const auto replacement     = ReadHash(totalFileCount, *inpDataProvider, archives);
+	auto archives = GetArchives(parser.positionalArguments());
+	Total(archives);
 
-	MergeRate(*inpDataProvider, replacement);
+	const auto inpDataProvider = std::make_shared<InpDataProvider>(parser.value(DUMP));
+	const auto replacement     = ReadHash(*inpDataProvider, archives);
+
+	MergeBookData(*inpDataProvider, replacement);
 	CreateInpx(settings, archives, *inpDataProvider);
 	CreateBookList(settings.outputFolder, *inpDataProvider);
 	CreateReview(settings.outputFolder, *inpDataProvider, replacement);
-	ProcessCompilations(settings.outputFolder, totalFileCount, archives, *inpDataProvider);
+	ProcessCompilations(settings.outputFolder, archives, *inpDataProvider);
 
 	return 0;
 }
