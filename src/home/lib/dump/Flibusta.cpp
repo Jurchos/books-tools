@@ -355,9 +355,19 @@ private: // IDatabase
 			functor(index);
 	}
 
-	const SeriesTable& GetSeriesTable() const noexcept override
+	const DictionaryTableDescription& GetAuthorTable() const noexcept override
 	{
-		static constexpr SeriesTable table { "libseqname", "SeqId", "SeqName" };
+		static const DictionaryTableDescription table {
+			"libavtorname",
+			"AvtorId",
+			{ "FirstName", "MiddleName", "LastName" }
+		};
+		return table;
+	}
+
+	const DictionaryTableDescription& GetSeriesTable() const noexcept override
+	{
+		static const DictionaryTableDescription table { "libseqname", "SeqId", { "SeqName" } };
 		return table;
 	}
 
