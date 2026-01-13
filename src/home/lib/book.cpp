@@ -138,7 +138,14 @@ QString& PrepareTitle(QString& value)
 	value = value.toLower();
 	std::ranges::transform(value, std::begin(value), [&](const QChar& ch) {
 		const auto it = std::ranges::find(replacement, ch.unicode(), &std::pair<char16_t, char16_t>::first);
-		return it != std::cend(replacement) ? QChar { it->second } : ch.category() == QChar::Separator_Space ? QChar { 0x20 } : ch;
+		if (it != std::cend(replacement))
+			return QChar { it->second };
+
+		const auto category = ch.category();
+		if (category == QChar::Separator_Space || (category >= QChar::Punctuation_Connector && category <= QChar::Punctuation_Other))
+			return QChar { 0x20 };
+
+		return ch;
 	});
 	return value;
 }
