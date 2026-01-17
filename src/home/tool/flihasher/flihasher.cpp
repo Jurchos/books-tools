@@ -1,8 +1,11 @@
 ﻿#include <QCryptographicHash>
 
+#include <condition_variable>
+#include <queue>
 #include <ranges>
 #include <set>
 
+#include <QBuffer>
 #include <QCommandLineParser>
 #include <QCoreApplication>
 #include <QDir>
@@ -38,7 +41,16 @@ constexpr auto APP_ID = "flihasher";
 constexpr auto OUTPUT                       = "output";
 constexpr auto FOLDER                       = "folder";
 constexpr auto LIBRARY                      = "library";
+constexpr auto THREADS                      = "threads";
 constexpr auto ARCHIVE_WILDCARD_OPTION_NAME = "archives";
+
+struct Options
+{
+	QDir         dstDir;
+	QString      sourceLib;
+	QStringList  args;
+	unsigned int maxThreadCount { std::thread::hardware_concurrency() };
+};
 
 struct ParseResult
 {
@@ -46,6 +58,23 @@ struct ParseResult
 	QString     title;
 	QString     hashText;
 	QStringList hashSections;
+};
+
+struct ImageTaskItem
+{
+	QString    file;
+	QByteArray body;
+	QString    hash;
+};
+
+struct BookTaskItem
+{
+	QString                    folder;
+	QString                    file;
+	QByteArray                 body;
+	ImageTaskItem              cover;
+	std::vector<ImageTaskItem> images;
+	ParseResult                parseResult;
 };
 
 class Fb2Parser final : public Util::SaxParser
@@ -188,73 +217,155 @@ private:
 	QCryptographicHash m_md5 { QCryptographicHash::Md5 };
 };
 
-QString GetHash(const Zip& zip, const QString& file, QCryptographicHash& md5)
+class Worker
 {
-	md5.reset();
-	md5.addData(&zip.Read(file)->GetStream());
-	return QString::fromUtf8(md5.result().toHex());
-}
+	NON_COPY_MOVABLE(Worker)
 
-QStringList GetImageHashes(const Zip& zip, const std::set<QString>& imageFiles, const QString& file, QCryptographicHash& md5)
-{
-	QStringList result;
-	std::ranges::transform(
-		std::ranges::equal_range(
-			imageFiles,
-			file,
-			{},
-			[n = file.length()](const QString& item) {
-				return QStringView { item.begin(), std::next(item.begin(), n) };
-			}
-		),
-		std::back_inserter(result),
-		[&](const auto& item) {
-			return GetHash(zip, item, md5);
+public:
+	class IObserver // NOLINT(cppcoreguidelines-special-member-functions)
+	{
+	public:
+		virtual ~IObserver()                                       = default;
+		virtual void OnFinished(std::vector<BookTaskItem> results) = 0;
+	};
+
+public:
+	Worker(IObserver& observer, std::condition_variable_any& queueCondition, std::mutex& queueGuard, std::queue<BookTaskItem>& queue, std::atomic<unsigned int>& queueSize, Util::Progress& progress)
+		: m_observer { observer }
+		, m_queueCondition { queueCondition }
+		, m_queueGuard { queueGuard }
+		, m_queue { queue }
+		, m_queueSize { queueSize }
+		, m_progress { progress }
+	{
+	}
+
+	~Worker()
+	{
+		m_thread = {};
+		m_observer.OnFinished(std::move(m_results));
+	}
+
+private:
+	void Work(std::stop_token stopToken)
+	{
+		QCryptographicHash md5 { QCryptographicHash::Md5 };
+		const auto         setHash = [&](ImageTaskItem& item) {
+            md5.reset();
+            md5.addData(item.body);
+            item.hash = QString::fromUtf8(md5.result().toHex());
+            item.body.clear();
+		};
+
+		PLOGV << "Worker started";
+		while (!stopToken.stop_requested() || m_queueSize)
+		{
+			auto bookTaskItemOpt = Dequeue(stopToken);
+			if (!bookTaskItemOpt)
+				continue;
+
+			auto& bookTaskItem = *bookTaskItemOpt;
+
+			QBuffer buffer(&bookTaskItem.body);
+			buffer.open(QIODevice::ReadOnly);
+			Fb2Parser parser(buffer);
+			bookTaskItem.parseResult = parser.GetResult();
+
+			if (!bookTaskItem.cover.body.isEmpty())
+				setHash(bookTaskItem.cover);
+			std::ranges::for_each(bookTaskItem.images, setHash);
+
+			const auto& result = m_results.emplace_back(std::move(bookTaskItem));
+
+			m_progress.Increment(1, result.file.toStdString());
 		}
-	);
-	std::ranges::sort(result);
-	return result;
-}
+		PLOGV << "Worker finished";
+	}
 
-void ProcessFile(
-	const QString&           folder,
-	const QString&           file,
-	const Zip&               zip,
-	const Zip*               coverZip,
-	const std::set<QString>& coverFiles,
-	const Zip*               imageZip,
-	const std::set<QString>& imageFiles,
-	Util::XmlWriter&         writer
-)
+	std::optional<BookTaskItem> Dequeue(const std::stop_token& stopToken) const
+	{
+		std::unique_lock queueLock(m_queueGuard);
+		m_queueCondition.wait(queueLock, stopToken, [&] {
+			return !m_queue.empty() || stopToken.stop_requested();
+		});
+
+		if (m_queue.empty())
+			return std::nullopt;
+
+		auto bookTaskItem = std::move(m_queue.front());
+		m_queue.pop();
+		--m_queueSize;
+		m_queueCondition.notify_all();
+
+		return bookTaskItem;
+	}
+
+private:
+	IObserver&                   m_observer;
+	std::condition_variable_any& m_queueCondition;
+	std::mutex&                  m_queueGuard;
+	std::queue<BookTaskItem>&    m_queue;
+	std::atomic<unsigned int>&   m_queueSize;
+	std::jthread                 m_thread { std::bind_front(&Worker::Work, this) };
+	Util::Progress&              m_progress;
+	std::vector<BookTaskItem>    m_results;
+};
+
+class TaskProcessor final : public Worker::IObserver
 {
-	QCryptographicHash md5 { QCryptographicHash::Md5 };
+public:
+	TaskProcessor(std::condition_variable_any& queueCondition, std::mutex& queueGuard, const unsigned int poolSize, Util::Progress& progress)
+		: m_queueCondition { queueCondition }
+		, m_queueGuard { queueGuard }
+		, m_workers { std::views::iota(0u, poolSize) | std::views::transform([&](const auto) {
+						  return std::make_unique<Worker>(*this, queueCondition, queueGuard, m_queue, m_queueSize, progress);
+					  })
+		              | std::ranges::to<std::vector<std::unique_ptr<Worker>>>() }
+	{
+	}
 
-	const auto bookGuard = writer.Guard("book");
-	const auto zipFile   = zip.Read(file);
-	Fb2Parser  parser(zipFile->GetStream());
-	const auto parseResult = parser.GetResult();
-	bookGuard->WriteAttribute("hash", parseResult.id)
-		.WriteAttribute("id", parseResult.hashText)
-		.WriteAttribute(Inpx::FOLDER, folder)
-		.WriteAttribute(Inpx::FILE, file)
-		.WriteAttribute("title", parseResult.title);
+public:
+	void Enqueue(BookTaskItem bookTaskItem)
+	{
+		std::unique_lock lock(m_queueGuard);
+		m_queue.emplace(std::move(bookTaskItem));
+		++m_queueSize;
+		m_queueCondition.notify_all();
+	}
 
-	const auto baseName = QFileInfo(file).completeBaseName();
-	if (coverZip && coverFiles.contains(baseName))
-		if (const auto coverHash = GetHash(*coverZip, baseName, md5); !coverHash.isEmpty())
-			bookGuard->Guard(Global::COVER)->WriteCharacters(coverHash);
+	unsigned int GetQueueSize() const
+	{
+		return m_queueSize;
+	}
 
-	if (imageZip)
-		for (const auto& imageHash : GetImageHashes(*imageZip, imageFiles, baseName + "/", md5))
-			bookGuard->Guard(Global::IMAGE)->WriteCharacters(imageHash);
+	std::vector<BookTaskItem>& Wait()
+	{
+		m_workers.clear();
+		std::ranges::sort(m_results, {}, [](const auto& item) {
+			return item.file;
+		});
+		return m_results;
+	}
 
-	FliLib::SerializeHashSections(parseResult.hashSections, writer);
-}
+private: // Worker::IObserver
+	void OnFinished(std::vector<BookTaskItem> results) override
+	{
+		std::ranges::move(std::move(results), std::back_inserter(m_results));
+	}
 
-void ProcessArchive(const QDir& dstDir, const QString& filePath, const QString& sourceLib, Util::Progress& progress)
+private:
+	std::condition_variable_any&         m_queueCondition;
+	std::mutex&                          m_queueGuard;
+	std::queue<BookTaskItem>             m_queue;
+	std::atomic<unsigned int>            m_queueSize { 0 };
+	std::vector<std::unique_ptr<Worker>> m_workers;
+	std::vector<BookTaskItem>            m_results;
+};
+
+void ProcessArchive(const Options& options, const QString& filePath, Util::Progress& progress)
 {
 	PLOGI << "process " << filePath;
-	assert(dstDir.exists());
+	assert(options.dstDir.exists());
 	Zip       zip(filePath);
 	QFileInfo fileInfo(filePath);
 
@@ -269,18 +380,76 @@ void ProcessArchive(const QDir& dstDir, const QString& filePath, const QString& 
 	const auto covers = (coversZip ? coversZip->GetFileNameList() : QStringList {}) | std::ranges::to<std::set<QString>>();
 	const auto images = (imagesZip ? imagesZip->GetFileNameList() : QStringList {}) | std::ranges::to<std::set<QString>>();
 
-	QFile output(dstDir.filePath(fileInfo.completeBaseName() + ".xml"));
+	QFile output(options.dstDir.filePath(fileInfo.completeBaseName() + ".xml"));
 	if (!output.open(QIODevice::WriteOnly))
-		throw std::ios_base::failure(std::format("Cannot create {}", dstDir.filePath(fileInfo.completeBaseName() + ".xml")));
+		throw std::ios_base::failure(std::format("Cannot create {}", options.dstDir.filePath(fileInfo.completeBaseName() + ".xml")));
+
+	const auto fileList = zip.GetFileNameList();
+
+	std::condition_variable_any queueCondition;
+	std::mutex                  queueGuard;
+	TaskProcessor               processor(queueCondition, queueGuard, std::min(options.maxThreadCount, static_cast<unsigned int>(fileList.size())), progress);
+
+	for (const auto& file : fileList)
+	{
+		BookTaskItem bookTaskItem { .folder = fileInfo.fileName(), .file = file, .body = zip.Read(file)->GetStream().readAll() };
+
+		const auto baseName = QFileInfo(file).completeBaseName();
+		if (coversZip && covers.contains(baseName))
+			bookTaskItem.cover = { QString {}, coversZip->Read(baseName)->GetStream().readAll() };
+
+		if (imagesZip)
+			std::ranges::transform(
+				std::ranges::equal_range(
+					images,
+					baseName + "/",
+					{},
+					[n = baseName.length() + 1](const QString& item) {
+						return QStringView { item.begin(), std::next(item.begin(), n) };
+					}
+				),
+				std::back_inserter(bookTaskItem.images),
+				[&](const QString& item) {
+					return ImageTaskItem { item.split("/").back(), imagesZip->Read(item)->GetStream().readAll() };
+				}
+			);
+
+		{
+			std::unique_lock lockStart(queueGuard);
+			queueCondition.wait(lockStart, [&]() {
+				return processor.GetQueueSize() < options.maxThreadCount * 2;
+			});
+		}
+
+		processor.Enqueue(std::move(bookTaskItem));
+	}
 
 	Util::XmlWriter writer(output);
 	const auto      booksGuard = writer.Guard("books");
-	booksGuard->WriteAttribute("source", sourceLib);
+	booksGuard->WriteAttribute("source", options.sourceLib);
 
-	for (const auto& file : zip.GetFileNameList())
+	for (const auto& file : processor.Wait())
 	{
-		ProcessFile(fileInfo.fileName(), file, zip, coversZip.get(), covers, imagesZip.get(), images, writer);
-		progress.Increment(1, file.toStdString());
+		const auto bookGuard = writer.Guard("book");
+		bookGuard->WriteAttribute("hash", file.parseResult.id)
+			.WriteAttribute("id", file.parseResult.hashText)
+			.WriteAttribute(Inpx::FOLDER, file.folder)
+			.WriteAttribute(Inpx::FILE, file.file)
+			.WriteAttribute("title", file.parseResult.title);
+
+		const auto writeImage = [&](const QString& nodeName, const ImageTaskItem& item) {
+			const auto guard = bookGuard->Guard(nodeName);
+			if (!item.file.isEmpty())
+				guard->WriteAttribute("id", item.file);
+			guard->WriteCharacters(item.hash);
+		};
+
+		if (!file.cover.hash.isEmpty())
+			writeImage(Global::COVER, file.cover);
+		for (const auto& item : file.images)
+			writeImage(Global::IMAGE, item);
+
+		FliLib::SerializeHashSections(file.parseResult.hashSections, writer);
 	}
 }
 
@@ -294,23 +463,18 @@ QStringList GetArchives(const QStringList& wildCards)
 	return result;
 }
 
-int run(const QCommandLineParser& parser)
+int run(const Options& options)
 {
 	try
 	{
-		QDir dstDir = parser.value(OUTPUT);
-		if (!dstDir.exists())
-			dstDir.mkpath(".");
+		if (!options.dstDir.exists())
+			options.dstDir.mkpath(".");
 
 		const auto availableLibraries = FliLib::Dump::GetAvailableLibraries();
-		auto       sourceLib          = parser.value(LIBRARY);
-		if (sourceLib.isEmpty())
-			sourceLib = availableLibraries.front();
-
-		if (!availableLibraries.contains(sourceLib, Qt::CaseInsensitive))
+		if (!availableLibraries.contains(options.sourceLib, Qt::CaseInsensitive))
 			throw std::invalid_argument(std::format("{} must be {}", LIBRARY, availableLibraries.join(" | ")));
 
-		const auto archives = GetArchives(parser.positionalArguments());
+		const auto archives = GetArchives(options.args);
 
 		PLOGD << "Total file count calculation";
 		const auto totalFileCount = std::accumulate(archives.cbegin(), archives.cend(), size_t { 0 }, [](const auto init, const auto& item) {
@@ -322,7 +486,7 @@ int run(const QCommandLineParser& parser)
 		Util::Progress progress(totalFileCount, "parsing");
 
 		for (const auto& archive : archives)
-			ProcessArchive(dstDir, archive, sourceLib, progress);
+			ProcessArchive(options, archive, progress);
 
 		return 0;
 	}
@@ -348,14 +512,17 @@ int main(int argc, char* argv[])
 
 	const auto availableLibraries = FliLib::Dump::GetAvailableLibraries();
 
+	Options options;
+
 	QCommandLineParser parser;
 	parser.setApplicationDescription(QString("%1 creates hash files for library").arg(APP_ID));
 	parser.addHelpOption();
 	parser.addVersionOption();
 	parser.addPositionalArgument(ARCHIVE_WILDCARD_OPTION_NAME, "Input archives wildcards");
 	parser.addOptions({
-		{ { "o", OUTPUT }, "Output database path (required)", FOLDER },
-		{ LIBRARY, "Library", QString("(%1) [%2]").arg(availableLibraries.join(" | "), availableLibraries.front()) },
+		{ { QString(OUTPUT[0]), OUTPUT }, "Output database path (required)", FOLDER },
+		{ LIBRARY, "Source library", QString("(%1) [%2]").arg(availableLibraries.join(" | "), availableLibraries.front()) },
+		{ { QString(THREADS[0]), THREADS }, "Maximum number of CPU threads", QString("Thread count [%1]").arg(options.maxThreadCount) },
 	});
 	const auto defaultLogPath = QString("%1/%2.%3.log").arg(QStandardPaths::writableLocation(QStandardPaths::TempLocation), COMPANY_ID, APP_ID);
 	const auto logOption      = Log::LoggingInitializer::AddLogFileOption(parser, defaultLogPath);
@@ -369,5 +536,16 @@ int main(int argc, char* argv[])
 	if (!parser.isSet(OUTPUT) || parser.positionalArguments().isEmpty())
 		parser.showHelp(1);
 
-	return run(parser);
+	options.dstDir = parser.value(OUTPUT);
+
+	options.sourceLib = parser.value(LIBRARY);
+	if (options.sourceLib.isEmpty())
+		options.sourceLib = availableLibraries.front();
+
+	if (parser.isSet(THREADS))
+		options.maxThreadCount = parser.value(THREADS).toUInt();
+
+	options.args = parser.positionalArguments();
+
+	return run(options);
 }
