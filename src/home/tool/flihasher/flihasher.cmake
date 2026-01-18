@@ -4,6 +4,7 @@ AddTarget(flihasher	app_console
 		"${CMAKE_CURRENT_LIST_DIR}"
 	LINK_LIBRARIES
 		Qt${QT_MAJOR_VERSION}::Core
+		cimg::cimg
 	LINK_TARGETS
 		lib
 		logging
