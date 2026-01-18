@@ -190,8 +190,8 @@ private:
 #define HASH_PARSER_CALLBACK_ITEM(NAME) [[maybe_unused]] QString NAME,
 		HASH_PARSER_CALLBACK_ITEMS_X_MACRO
 #undef HASH_PARSER_CALLBACK_ITEM
-			QString cover,
-		QStringList images,
+			HashParser::HashImageItem          cover,
+		std::vector<HashParser::HashImageItem> images,
 		Section::Ptr
 	) override
 	{
@@ -201,8 +201,8 @@ private:
 		m_progress.Increment(1, file.toStdString());
 
 		decltype(UniqueFile::images) imageItems;
-		std::ranges::transform(std::move(images) | std::views::as_rvalue, std::inserter(imageItems, imageItems.end()), [](QString&& item) {
-			return ImageItem { .hash = std::move(item) };
+		std::ranges::transform(std::move(images) | std::views::as_rvalue, std::inserter(imageItems, imageItems.end()), [](auto&& item) {
+			return ImageItem { .fileName = std::move(item.id), .hash = std::move(item.hash), .pHash = item.pHash.toULongLong() };
 		});
 
 		if (!m_bookFiles.contains(file))
@@ -225,7 +225,7 @@ private:
 				.hash     = std::move(hash),
 				.title    = { std::make_move_iterator(split.begin()), std::make_move_iterator(split.end()) },
 				.hashText = std::move(hashText),
-				.cover    = { .hash = std::move(cover) },
+				.cover    = { .hash = std::move(cover.hash), .pHash = cover.pHash.toULongLong() },
 				.images   = std::move(imageItems),
 				.order    = QFileInfo(file).baseName().toInt(),
         }
