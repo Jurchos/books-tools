@@ -15,6 +15,7 @@ struct LIB_EXPORT ImageItem
 	QByteArray body;
 	QDateTime  dateTime;
 	QString    hash;
+	uint64_t   pHash { 0 };
 
 	bool operator<(const ImageItem& rhs) const;
 };

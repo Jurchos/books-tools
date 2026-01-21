@@ -1,6 +1,7 @@
 #include "UniqueFile.h"
 
 #include <ranges>
+#include <unordered_set>
 
 #include <QDir>
 #include <QFile>
@@ -67,6 +68,14 @@ private: // Util::SaxParser
 			section->parent  = m_currentSection;
 			m_currentSection = section.get();
 		}
+		else if (path == COVER)
+		{
+			m_cover.pHash = attributes.GetAttribute("pHash");
+		}
+		else if (path == IMAGE)
+		{
+			m_images.emplace_back(attributes.GetAttribute("id"), QString(), attributes.GetAttribute("pHash"));
+		}
 
 		return true;
 	}
@@ -105,9 +114,9 @@ private: // Util::SaxParser
 	bool OnCharacters(const QString& path, const QString& value) override
 	{
 		if (path == COVER)
-			m_cover = value;
+			m_cover.hash = value;
 		else if (path == IMAGE)
-			m_images << value;
+			m_images.back().hash = value;
 		return true;
 	}
 
@@ -117,10 +126,10 @@ private:
 	HASH_PARSER_CALLBACK_ITEMS_X_MACRO
 #undef HASH_PARSER_CALLBACK_ITEM
 
-	QString      m_cover;
-	QStringList  m_images;
-	Section::Ptr m_section;
-	Section*     m_currentSection { nullptr };
+	HashParser::HashImageItem              m_cover;
+	std::vector<HashParser::HashImageItem> m_images;
+	Section::Ptr                           m_section;
+	Section*                               m_currentSection { nullptr };
 };
 
 class ISerializer // NOLINT(cppcoreguidelines-special-member-functions)
@@ -208,6 +217,8 @@ enum class ImagesCompareResult
 	Varied,
 };
 
+constexpr auto POP_COUNT_THRESHOLD = 5;
+
 [[nodiscard]] ImagesCompareResult CompareImages(const UniqueFile& lhs, const UniqueFile& rhs)
 {
 	auto result = ImagesCompareResult::Equal;
@@ -217,29 +228,25 @@ enum class ImagesCompareResult
 			result = ImagesCompareResult::Inner;
 		else if (rhs.cover.hash.isEmpty())
 			result = ImagesCompareResult::Outer;
-		else
+		else if (lhs.cover.pHash == 0 || rhs.cover.pHash == 0 || std::popcount(lhs.cover.pHash ^ rhs.cover.pHash) > POP_COUNT_THRESHOLD)
 			return ImagesCompareResult::Varied;
 	}
 
-	auto lIt = lhs.images.cbegin(), rIt = rhs.images.cbegin();
+	std::vector<uint64_t>             lpHashes;
+	std::unordered_multiset<uint64_t> rpHashes;
+	auto                              lIt = lhs.images.cbegin(), rIt = rhs.images.cbegin();
 	while (lIt != lhs.images.cend() && rIt != rhs.images.cend())
 	{
 		if (lIt->hash < rIt->hash)
 		{
-			if (result == ImagesCompareResult::Inner)
-				return ImagesCompareResult::Varied;
-
-			result = ImagesCompareResult::Outer;
+			lpHashes.emplace_back(lIt->pHash);
 			++lIt;
 			continue;
 		}
 
 		if (lIt->hash > rIt->hash)
 		{
-			if (result == ImagesCompareResult::Outer)
-				return ImagesCompareResult::Varied;
-
-			result = ImagesCompareResult::Inner;
+			rpHashes.emplace(rIt->pHash);
 			++rIt;
 			continue;
 		}
@@ -247,22 +254,43 @@ enum class ImagesCompareResult
 		++rIt;
 	}
 
-	if (result == ImagesCompareResult::Varied)
-		return result;
+	if (!(lpHashes.empty() || rpHashes.empty()))
+	{
+		for (; lIt != lhs.images.cend(); ++lIt)
+			lpHashes.emplace_back(lIt->pHash);
+		for (; rIt != rhs.images.cend(); ++rIt)
+			rpHashes.emplace(rIt->pHash);
+		erase_if(lpHashes, [&](const uint64_t lItem) {
+			if (lItem == 0)
+				return false;
+			if (const auto it = std::ranges::find_if(
+					rpHashes,
+					[&](const uint64_t rItem) {
+						return std::popcount(lItem ^ rItem) <= POP_COUNT_THRESHOLD;
+					}
+				);
+			    it != rpHashes.end())
+			{
+				rpHashes.erase(it);
+				return true;
+			}
+			return false;
+		});
+	}
 
-	if (lIt != lhs.images.cend())
+	if (!lpHashes.empty())
 		result = result == ImagesCompareResult::Inner ? ImagesCompareResult::Varied : ImagesCompareResult::Outer;
 
 	if (result == ImagesCompareResult::Varied)
 		return result;
 
-	if (rIt != rhs.images.cend())
+	if (!rpHashes.empty())
 		result = result == ImagesCompareResult::Outer ? ImagesCompareResult::Varied : ImagesCompareResult::Inner;
 
 	if (result == ImagesCompareResult::Varied)
 		return result;
 
-	if ((!lhs.images.empty() && !rhs.images.empty()) || (!lhs.cover.hash.isEmpty() && lhs.cover.hash == rhs.cover.hash))
+	if (!((lhs.images.empty() || rhs.images.empty()) && (lhs.cover.hash.isEmpty() || rhs.cover.hash.isEmpty())))
 		return result;
 
 	if (std::ranges::includes(lhs.title, rhs.title) || std::ranges::includes(rhs.title, lhs.title))
@@ -560,8 +588,8 @@ void UniqueFileStorage::OnBookParsed(
 #define HASH_PARSER_CALLBACK_ITEM(NAME) QString NAME,
 	HASH_PARSER_CALLBACK_ITEMS_X_MACRO
 #undef HASH_PARSER_CALLBACK_ITEM
-		QString cover,
-	QStringList images,
+		HashParser::HashImageItem          cover,
+	std::vector<HashParser::HashImageItem> images,
 	Section::Ptr
 )
 {
@@ -569,8 +597,8 @@ void UniqueFileStorage::OnBookParsed(
 		return;
 
 	decltype(UniqueFile::images) imageItems;
-	std::ranges::transform(std::move(images) | std::views::as_rvalue, std::inserter(imageItems, imageItems.end()), [](QString&& item) {
-		return ImageItem { .hash = std::move(item) };
+	std::ranges::transform(std::move(images) | std::views::as_rvalue, std::inserter(imageItems, imageItems.end()), [](auto&& item) {
+		return ImageItem { .fileName = std::move(item.id), .hash = std::move(item.hash), .pHash = item.pHash.toULongLong() };
 	});
 
 	const UniqueFile::Uid uid { folder, file };
@@ -584,11 +612,11 @@ void UniqueFileStorage::OnBookParsed(
 	auto split = title.split(' ', Qt::SkipEmptyParts);
 
 	UniqueFile uniqueFile {
-		.uid      = { .folder = std::move(folder), .file = std::move(file) },
+		.uid      = {            .folder = std::move(folder),              .file = std::move(file) },
 		.hash     = std::move(hash),
 		.title    = { std::make_move_iterator(split.begin()), std::make_move_iterator(split.end()) },
 		.hashText = id,
-		.cover    = { .hash = std::move(cover) },
+		.cover    = {          .hash = std::move(cover.hash),   .pHash = cover.pHash.toULongLong() },
 		.images   = std::move(imageItems),
 	};
 	uniqueFile.order = QFileInfo(uniqueFile.uid.file).baseName().toInt();

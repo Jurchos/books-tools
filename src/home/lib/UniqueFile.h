@@ -47,6 +47,13 @@ struct HashParser
 	HASH_PARSER_CALLBACK_ITEM(originFolder) \
 	HASH_PARSER_CALLBACK_ITEM(originFile)
 
+	struct HashImageItem
+	{
+		QString id;
+		QString hash;
+		QString pHash;
+	};
+
 	class IObserver // NOLINT(cppcoreguidelines-special-member-functions)
 	{
 	public:
@@ -56,9 +63,9 @@ struct HashParser
 #define HASH_PARSER_CALLBACK_ITEM(NAME) QString NAME,
 			HASH_PARSER_CALLBACK_ITEMS_X_MACRO
 #undef HASH_PARSER_CALLBACK_ITEM
-				QString  cover,
-			QStringList  images,
-			Section::Ptr section
+				HashImageItem          cover,
+			std::vector<HashImageItem> images,
+			Section::Ptr               section
 		) = 0;
 	};
 
@@ -143,9 +150,9 @@ private:
 #define HASH_PARSER_CALLBACK_ITEM(NAME) QString NAME,
 		HASH_PARSER_CALLBACK_ITEMS_X_MACRO
 #undef HASH_PARSER_CALLBACK_ITEM
-			QString  cover,
-		QStringList  images,
-		Section::Ptr section
+			HashParser::HashImageItem          cover,
+		std::vector<HashParser::HashImageItem> images,
+		Section::Ptr                           section
 	) override;
 
 private:
