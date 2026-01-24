@@ -254,8 +254,7 @@ std::pair<CImg<unsigned char>, CImg<float>> Canny::sobel(const CImg<unsigned cha
 	const auto size = static_cast<unsigned int>(xFilter.size()) / 2;
 
 	CImg<unsigned char> sFiltered(gFiltered._width - 2 * size, gFiltered._height - 2 * size);
-
-	CImg<float> angles = CImg<unsigned char>(gFiltered._width - 2 * size, gFiltered._height - 2 * size); //AngleMap
+	CImg<float> angles(gFiltered._width - 2 * size, gFiltered._height - 2 * size); //AngleMap
 
 	for (auto i = size; i < gFiltered._height - size; i++)
 	{
