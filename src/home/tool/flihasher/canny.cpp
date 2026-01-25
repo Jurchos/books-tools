@@ -241,6 +241,7 @@ Canny::Rect Canny::Process(const CImg<unsigned char>& img) const
 	const auto [sFiltered, angles] = Sobel(gFiltered);
 	const auto nonMaxSupped = nonMaxSupp(sFiltered, angles);
 	const auto thresholded = threshold(nonMaxSupped, m_thresholdLow, m_thresholdHigh);
+
 	Rect rect { .top = 0, .left = 0, .bottom = static_cast<int>(thresholded._height), .right = static_cast<int>(thresholded._width )};
 	for (const auto* data = thresholded.data(); rect.top < rect.bottom; ++rect.top, data += thresholded._width)
 		if (memchr(data, 255, thresholded._width))
