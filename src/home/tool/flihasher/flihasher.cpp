@@ -107,31 +107,32 @@ uint64_t GetPHash(const QByteArray& body)
 
 	auto       image    = pixmap.toImage();
 	const auto hasAlpha = image.pixelFormat().alphaUsage() == QPixelFormat::UsesAlpha;
-	image.convertTo(hasAlpha ? QImage::Format_RGBA8888 : QImage::Format_RGB888);
+	image.convertTo(hasAlpha ? QImage::Format_RGBA8888 : QImage::Format_Grayscale8);
 
-	const auto    pixelSize = hasAlpha ? 4 : 3;
-	auto          data      = new uint8_t[static_cast<size_t>(image.width()) * image.height() * pixelSize];
-	CImg<uint8_t> src(data, image.width(), image.height(), 1, pixelSize, true);
-	src._is_shared = false;
+	auto          data = new uint8_t[static_cast<size_t>(image.width()) * image.height()];
+	CImg<uint8_t> img(data, image.width(), image.height(), 1, 1, true);
+	img._is_shared = false;
 
-	std::vector<uint8_t*> planes;
-	planes.reserve(pixelSize);
-	for (int i = 0; i < pixelSize; ++i)
-		planes.push_back(data + static_cast<size_t>(image.width()) * image.height() * i);
-
-	for (auto h = 0, szh = image.height(), szw = image.width(); h < szh; ++h)
+	if (hasAlpha)
 	{
-		const auto* line = image.scanLine(h);
-		for (auto w = 0; w < szw; ++w)
-			for (int i = 0; i < pixelSize; ++i)
-				*planes[i]++ = *line++;
+		auto* dst = img.data();
+		for (auto h = 0, szh = image.height(), szw = image.width(); h < szh; ++h)
+		{
+			const auto* src = image.scanLine(h);
+			for (auto w = 0; w < szw; ++w, ++dst, src += 4)
+				*dst = static_cast<uint8_t>(std::lround((0.299 * src[0] + 0.587 * src[1] + 0.114 * src[2]) * src[3] / 255.0 + (255.0 - src[3])));
+		}
 	}
-
-	auto img = (src.spectrum() == 3 ? src.RGBtoYCbCr() : src.spectrum() == 4 ? src.crop(0, 0, 0, 0, src.width() - 1, src.height() - 1, 0, 2).RGBtoYCbCr() : src).channel(0);
+	else
+	{
+		auto* dst = img.data();
+		for (auto h = 0, szh = image.height(), szw = image.width(); h < szh; ++h, dst += szw)
+			memcpy(dst, image.scanLine(h), szw);
+	}
 
 	Canny      canny;
 	const auto cropRect = canny.Process(img);
-	if (cropRect.width() > src.width() / 2 && cropRect.height() > src.height() / 2)
+	if (cropRect.width() > img.width() / 2 && cropRect.height() > img.height() / 2)
 		img.crop(cropRect.left, cropRect.top, cropRect.right - 1, cropRect.bottom - 1);
 
 	const auto resized = img.get_convolve(MEAN_FILTER).resize(32, 32);
