@@ -234,7 +234,7 @@ Canny::Canny(const int gaussianFilterSize, const double gaussianSigma, const int
 
 Canny::Rect Canny::Process(const CImg<unsigned char>& img) const
 {
-	if (std::max(img.width(), img.height()) < 50)
+	if (std::min(img.width(), img.height()) < 50)
 		return Rect {};
 
 	const auto gFiltered = useFilter(img, m_gaussianFilter);
