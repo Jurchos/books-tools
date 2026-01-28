@@ -1,10 +1,9 @@
 #include "canny.h"
 
-#include <cmath>
-
 #include <array>
 #include <cassert>
 #include <iostream>
+#include <numbers>
 #include <vector>
 
 using namespace cimg_library;
@@ -13,12 +12,12 @@ namespace
 {
 
 template <std::integral U, std::floating_point V>
-U round(const V v)
+U Round(const V v)
 {
 	return static_cast<U>(std::min(std::llround(v), static_cast<long long>(std::numeric_limits<U>::max())));
 }
 
-std::vector<std::vector<double>> createGaussianFilter(const int row, const int column, const double sigmaIn)
+std::vector<std::vector<double>> CreateGaussianFilter(const int row, const int column, const double sigmaIn)
 {
 	assert((row & 1) && (column & 1));
 
@@ -29,9 +28,9 @@ std::vector<std::vector<double>> createGaussianFilter(const int row, const int c
 	// Sum is for normalization
 	auto sum = 0.0;
 
-	for (int x = -row / 2; x <= row / 2; x++)
-		for (int y = -column / 2; y <= column / 2; y++)
-			sum += (result[x + row / 2][y + column / 2] = exp(-(x * x + y * y) / constant) / (M_PI * constant));
+	for (int x = -row / 2; x <= row / 2; ++x)
+		for (int y = -column / 2; y <= column / 2; ++y)
+			sum += (result[x + row / 2][y + column / 2] = std::exp(-(x * x + y * y) / constant) / (std::numbers::pi * constant));
 
 	// Normalize the Filter
 	for (int i = 0; i < row; ++i)
@@ -42,7 +41,7 @@ std::vector<std::vector<double>> createGaussianFilter(const int row, const int c
 }
 
 template <typename T>
-CImg<T> useFilter(CImg<T> src, const std::vector<std::vector<double>>& filterIn)
+CImg<T> ApplyFilter(CImg<T> src, const std::vector<std::vector<double>>& filterIn)
 {
 	const auto size = static_cast<unsigned int>(filterIn.size()) / 2;
 	CImg<T>    result(src._width - 2 * size, src._height - 2 * size);
@@ -56,35 +55,29 @@ CImg<T> useFilter(CImg<T> src, const std::vector<std::vector<double>>& filterIn)
 				for (auto y = 0U; y < sz; ++y)
 					sum += filterIn[x][y] * src(i + y - size, j + x - size);
 
-			result(i - size, j - size) = round<T>(sum);
+			result(i - size, j - size) = Round<T>(sum);
 		}
 	}
 
 	return result;
 }
 
-std::pair<CImg<unsigned char>, CImg<float>> Sobel(const CImg<unsigned char>& src)
+std::pair<CImg<unsigned char>, CImg<float>> ApplySobel(const CImg<unsigned char>& src)
 {
-	//Sobel X Filter
-	static constexpr std::array<std::array<double, 3>, 3> xFilter = {
-		{
-         { -1.0, 0, 1.0 },
-         { -2.0, 0, 2.0 },
-         { -1.0, 0, 1.0 },
-		 }
-	};
+	static constexpr std::array<std::array<double, 3>, 3>
+		xSobelFilter = {{
+			{ -1.0, 0, 1.0 },
+			{ -2.0, 0, 2.0 },
+			{ -1.0, 0, 1.0 },
+		}},
+		ySobelFilter = {{
+			{ 1.0, 2.0, 1.0 },
+			{ 0, 0, 0 },
+			{ -1.0, -2.0, -1.0 },
+		}};
+	static_assert(xSobelFilter.size() == ySobelFilter.size());
 
-	//Sobel Y Filter
-	static constexpr std::array<std::array<double, 3>, 3> yFilter = {
-		{
-         { 1.0, 2.0, 1.0 },
-         { 0, 0, 0 },
-         { -1.0, -2.0, -1.0 },
-		 }
-	};
-
-	//Limit Size
-	static constexpr auto size = static_cast<unsigned int>(xFilter.size()) / 2;
+	static constexpr auto size = static_cast<unsigned int>(xSobelFilter.size()) / 2;
 
 	CImg<unsigned char> sFiltered(src._width - 2 * size, src._height - 2 * size);
 	CImg<float>         angles(src._width - 2 * size, src._height - 2 * size);
@@ -95,14 +88,14 @@ std::pair<CImg<unsigned char>, CImg<float>> Sobel(const CImg<unsigned char>& src
 		{
 			auto sumX = 0.0, sumY = 0.0;
 
-			for (auto x = 0U; x < xFilter.size(); ++x)
-				for (auto y = 0U; y < xFilter.size(); ++y)
+			for (auto x = 0U; x < xSobelFilter.size(); ++x)
+				for (auto y = 0U; y < ySobelFilter.size(); ++y)
 				{
-					sumX += xFilter[x][y] * src(j + y - size, i + x - size);
-					sumY += yFilter[x][y] * src(j + y - size, i + x - size);
+					sumX += xSobelFilter[x][y] * src(j + y - size, i + x - size);
+					sumY += ySobelFilter[x][y] * src(j + y - size, i + x - size);
 				}
 
-			sFiltered(j - size, i - size) = round<unsigned char>(std::sqrt(sumX * sumX + sumY * sumY));
+			sFiltered(j - size, i - size) = Round<unsigned char>(std::sqrt(sumX * sumX + sumY * sumY));
 			angles(j - size, i - size)    = std::abs(sumX) <= std::numeric_limits<double>::epsilon() ? 90.0f : static_cast<float>(std::atan(sumY / sumX));
 		}
 	}
@@ -110,7 +103,7 @@ std::pair<CImg<unsigned char>, CImg<float>> Sobel(const CImg<unsigned char>& src
 	return std::make_pair(std::move(sFiltered), std::move(angles));
 }
 
-CImg<unsigned char> threshold(const CImg<unsigned char>& src, int low, int high)
+CImg<unsigned char> ApplyThreshold(const CImg<unsigned char>& src, int low, int high)
 {
 	if (low > 255)
 		low = 255;
@@ -228,7 +221,7 @@ CImg<unsigned char> nonMaxSupp(const CImg<unsigned char>& sFiltered, const CImg<
 Canny::Canny(const int gaussianFilterSize, const double gaussianSigma, const int thresholdLow, const int thresholdHigh)
 	: m_thresholdLow { thresholdLow }
 	, m_thresholdHigh { thresholdHigh }
-	, m_gaussianFilter { createGaussianFilter(gaussianFilterSize, gaussianFilterSize, gaussianSigma) }
+	, m_gaussianFilter { CreateGaussianFilter(gaussianFilterSize, gaussianFilterSize, gaussianSigma) }
 {
 }
 
@@ -237,29 +230,29 @@ Canny::Rect Canny::Process(const CImg<unsigned char>& img) const
 	if (std::min(img.width(), img.height()) < 20)
 		return Rect {};
 
-	const auto gFiltered = useFilter(img, m_gaussianFilter);
-	const auto [sFiltered, angles] = Sobel(gFiltered);
-	const auto nonMaxSupped = nonMaxSupp(sFiltered, angles);
-	const auto thresholded = threshold(nonMaxSupped, m_thresholdLow, m_thresholdHigh);
+	const auto gFiltered           = ApplyFilter(img, m_gaussianFilter);
+	const auto [sFiltered, angles] = ApplySobel(gFiltered);
+	const auto nonMaxSupped        = nonMaxSupp(sFiltered, angles);
+	const auto threshold           = ApplyThreshold(nonMaxSupped, m_thresholdLow, m_thresholdHigh);
 
-	Rect rect { .top = 0, .left = 0, .bottom = static_cast<int>(thresholded._height), .right = static_cast<int>(thresholded._width )};
-	for (const auto* data = thresholded.data(); rect.top < rect.bottom; ++rect.top, data += thresholded._width)
-		if (memchr(data, 255, thresholded._width))
+	Rect rect { .top = 0, .left = 0, .bottom = static_cast<int>(threshold._height), .right = static_cast<int>(threshold._width) };
+	for (const auto* data = threshold.data(); rect.top < rect.bottom; ++rect.top, data += threshold._width)
+		if (memchr(data, 255, threshold._width))
 			break;
 
-	for (const auto* data = thresholded.data() + static_cast<size_t>(thresholded._width) * (thresholded._height - 1); rect.top < rect.bottom; --rect.bottom, data -= thresholded._width)
-		if (memchr(data, 255, thresholded._width))
+	for (const auto* data = threshold.data() + static_cast<size_t>(threshold._width) * (threshold._height - 1); rect.top < rect.bottom; --rect.bottom, data -= threshold._width)
+		if (memchr(data, 255, threshold._width))
 			break;
 
 	for (; rect.left < rect.right; ++rect.left)
-		for (auto i = 0U; i < thresholded._height; ++i)
-			if (thresholded(rect.left, i) == 255)
+		for (auto i = 0U; i < threshold._height; ++i)
+			if (threshold(rect.left, i) == 255)
 				goto leftFound;
 leftFound:
 
 	for (; rect.left < rect.right; --rect.right)
-		for (auto i = 0U; i < thresholded._height; ++i)
-			if (thresholded(rect.right - 1, i) == 255)
+		for (auto i = 0U; i < threshold._height; ++i)
+			if (threshold(rect.right - 1, i) == 255)
 				goto rightFound;
 rightFound:
 
