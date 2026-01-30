@@ -130,8 +130,10 @@ uint64_t GetPHash(const QByteArray& body)
 			memcpy(dst, image.scanLine(h), szw);
 	}
 
-	Canny      canny;
-	const auto cropRect = canny.Process(img);
+	const Canny canny;
+	const auto  cropRect = canny.Process(img);
+	static_assert(sizeof(cropRect) == sizeof(uint64_t));
+
 	if (cropRect.width() > img.width() / 2 && cropRect.height() > img.height() / 2)
 		img.crop(cropRect.left, cropRect.top, cropRect.right - 1, cropRect.bottom - 1);
 
@@ -149,9 +151,9 @@ uint64_t GetPHash(const QByteArray& body)
 
 class Fb2Parser final : public Util::SaxParser
 {
-	static constexpr auto BODY     = "FictionBook/body";
-	static constexpr auto TITLE    = "FictionBook/description/title-info/book-title";
-	static constexpr auto SECTION  = "section";
+	static constexpr auto BODY    = "FictionBook/body";
+	static constexpr auto TITLE   = "FictionBook/description/title-info/book-title";
+	static constexpr auto SECTION = "section";
 
 	struct Section
 	{
@@ -517,7 +519,7 @@ void ProcessArchive(const Options& options, const QString& filePath, Util::Progr
 			if (!item.file.isEmpty())
 				guard->WriteAttribute("id", item.file);
 			if (item.pHash)
-				guard->WriteAttribute("pHash", QString::number(item.pHash));
+				guard->WriteAttribute("pHash", QString::number(item.pHash, 16));
 			guard->WriteCharacters(item.hash);
 		};
 

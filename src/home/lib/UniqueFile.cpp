@@ -598,7 +598,7 @@ void UniqueFileStorage::OnBookParsed(
 
 	decltype(UniqueFile::images) imageItems;
 	std::ranges::transform(std::move(images) | std::views::as_rvalue, std::inserter(imageItems, imageItems.end()), [](auto&& item) {
-		return ImageItem { .fileName = std::move(item.id), .hash = std::move(item.hash), .pHash = item.pHash.toULongLong() };
+		return ImageItem { .fileName = std::move(item.id), .hash = std::move(item.hash), .pHash = item.pHash.toULongLong(nullptr, 16) };
 	});
 
 	const UniqueFile::Uid uid { folder, file };
@@ -612,11 +612,11 @@ void UniqueFileStorage::OnBookParsed(
 	auto split = title.split(' ', Qt::SkipEmptyParts);
 
 	UniqueFile uniqueFile {
-		.uid      = {            .folder = std::move(folder),              .file = std::move(file) },
+		.uid      = { .folder = std::move(folder), .file = std::move(file) },
 		.hash     = std::move(hash),
 		.title    = { std::make_move_iterator(split.begin()), std::make_move_iterator(split.end()) },
 		.hashText = id,
-		.cover    = {          .hash = std::move(cover.hash),   .pHash = cover.pHash.toULongLong() },
+		.cover    = { .hash = std::move(cover.hash), .pHash = cover.pHash.toULongLong(nullptr, 16) },
 		.images   = std::move(imageItems),
 	};
 	uniqueFile.order = QFileInfo(uniqueFile.uid.file).baseName().toInt();

@@ -23,7 +23,6 @@
 #include "logging/init.h"
 #include "util/BookUtil.h"
 #include "util/LogConsoleFormatter.h"
-#include "util/files.h"
 #include "util/progress.h"
 #include "util/xml/Initializer.h"
 #include "util/xml/SaxParser.h"
@@ -202,7 +201,7 @@ private:
 
 		decltype(UniqueFile::images) imageItems;
 		std::ranges::transform(std::move(images) | std::views::as_rvalue, std::inserter(imageItems, imageItems.end()), [](auto&& item) {
-			return ImageItem { .fileName = std::move(item.id), .hash = std::move(item.hash), .pHash = item.pHash.toULongLong() };
+			return ImageItem { .fileName = std::move(item.id), .hash = std::move(item.hash), .pHash = item.pHash.toULongLong(nullptr, 16) };
 		});
 
 		if (!m_bookFiles.contains(file))
@@ -225,7 +224,7 @@ private:
 				.hash     = std::move(hash),
 				.title    = { std::make_move_iterator(split.begin()), std::make_move_iterator(split.end()) },
 				.hashText = std::move(hashText),
-				.cover    = { .hash = std::move(cover.hash), .pHash = cover.pHash.toULongLong() },
+				.cover    = { .hash = std::move(cover.hash), .pHash = cover.pHash.toULongLong(nullptr, 16) },
 				.images   = std::move(imageItems),
 				.order    = QFileInfo(file).baseName().toInt(),
         }
