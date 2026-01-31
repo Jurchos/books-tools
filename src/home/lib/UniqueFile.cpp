@@ -217,7 +217,7 @@ enum class ImagesCompareResult
 	Varied,
 };
 
-constexpr auto POP_COUNT_THRESHOLD = 5;
+constexpr auto POP_COUNT_THRESHOLD = 9;
 
 [[nodiscard]] ImagesCompareResult CompareImages(const UniqueFile& lhs, const UniqueFile& rhs)
 {
