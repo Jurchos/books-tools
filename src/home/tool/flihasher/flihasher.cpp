@@ -13,6 +13,8 @@
 #include <QPixmap>
 #include <QStandardPaths>
 
+#include "fnd/ScopedCall.h"
+
 #include <plog/Appenders/ConsoleAppender.h>
 
 #include "lib/book.h"
@@ -99,9 +101,9 @@ struct BookTaskItem
 	ParseResult                parseResult;
 };
 
-uint64_t GetPHash(const QByteArray& body)
+uint64_t GetPHash(const ImageTaskItem& item)
 {
-	auto pixmap = Util::Decode(body);
+	auto pixmap = Util::Decode(item.body);
 	if (pixmap.isNull())
 		return 0;
 
@@ -140,10 +142,21 @@ uint64_t GetPHash(const QByteArray& body)
 	const auto resized = img.get_convolve(MEAN_FILTER).resize(32, 32);
 	const auto dct     = (DCT * resized * DCT_T).crop(1, 1, 8, 8);
 
-	return std::accumulate(dct._data, dct._data + 64, uint64_t { 0 }, [median = dct.median()](const uint64_t init, const float value) {
+#ifndef NDEBUG
+	QString str;
+	const ScopedCall strGuard([&] {
+		PLOGV << item.file << ": " << str;
+	});
+#endif
+
+	return std::accumulate(dct._data, dct._data + 64, uint64_t { 0 }, [&, median = dct.median()](const uint64_t init, const float value) {
 		auto result = init << 1;
 		if (value > median)
 			result |= 1;
+
+#ifndef NDEBUG
+		str.append(value > median ? "1" : "0");
+#endif
 
 		return result;
 	});
@@ -321,7 +334,7 @@ private:
             md5.reset();
             md5.addData(item.body);
             item.hash  = QString::fromUtf8(md5.result().toHex());
-            item.pHash = GetPHash(item.body);
+            item.pHash = GetPHash(item);
             item.body.clear();
 		};
 
@@ -333,6 +346,7 @@ private:
 				continue;
 
 			auto& bookTaskItem = *bookTaskItemOpt;
+			PLOGV << bookTaskItem.file;
 
 			QBuffer buffer(&bookTaskItem.body);
 			buffer.open(QIODevice::ReadOnly);
