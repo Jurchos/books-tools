@@ -388,7 +388,7 @@ const std::vector<Book*>& InpDataProvider::Books() const noexcept
 	return m_books;
 }
 
-void InpDataProvider::SetFile(const UniqueFile::Uid& uid, QString id)
+Book* InpDataProvider::SetFile(const UniqueFile::Uid& uid, QString id)
 {
 	assert(m_currentInpData);
 	if (const auto it = m_currentInpData->find(uid.file); it != m_currentInpData->end())
@@ -396,7 +396,10 @@ void InpDataProvider::SetFile(const UniqueFile::Uid& uid, QString id)
 		assert(it->second);
 		auto& book = m_data.try_emplace(QString("%1#%2").arg(uid.folder, uid.file), it->second).first->second;
 		book->id   = std::move(id);
+		return book.get();
 	}
+
+	return nullptr;
 }
 
 UniqueFileStorage::UniqueFileStorage(QString dstDir, std::shared_ptr<InpDataProvider> inpDataProvider)
@@ -602,13 +605,10 @@ void UniqueFileStorage::OnBookParsed(
 	});
 
 	const UniqueFile::Uid uid { folder, file };
-	m_inpDataProvider->SetFile(uid, id);
 
-	if (const auto* book = m_inpDataProvider->GetBook(uid))
-	{
-		auto dumpTitle = book->title;
-		title          = SimplifyTitle(PrepareTitle(dumpTitle));
-	}
+	if (const auto* book = m_inpDataProvider->SetFile(uid, id))
+		title.append(" ").append(book->title);
+	SimplifyTitle(PrepareTitle(title));
 	auto split = title.split(' ', Qt::SkipEmptyParts);
 
 	UniqueFile uniqueFile {

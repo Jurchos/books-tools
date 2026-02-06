@@ -194,11 +194,14 @@ private:
 		if (!m_bookFiles.contains(file))
 			return;
 
-		auto split    = title.split(' ', Qt::SkipEmptyParts);
+		UniqueFile::Uid uid { .folder = m_fileInfo.fileName(), .file = file };
+		if (const auto* book = m_inpDataProvider.SetFile(uid, id))
+			title.append(" ").append(book->title);
+		SimplifyTitle(PrepareTitle(title));
+		auto split = title.split(' ', Qt::SkipEmptyParts);
+
 		auto hashText = id;
 
-		UniqueFile::Uid uid { .folder = m_fileInfo.fileName(), .file = file };
-		m_inpDataProvider.SetFile(uid, id);
 
 		m_uniqueFileStorage.Add(
 			std::move(id),
