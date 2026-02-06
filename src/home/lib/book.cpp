@@ -133,7 +133,7 @@ QString& PrepareTitle(QString& value)
 	static constexpr std::pair<char16_t, char16_t> replacement[] {
 		{ 0x0451, 0x0435 },
 		{ 0x0439, 0x0438 },
-		{ 0x044A, 0x044C }
+		{ 0x044A, 0x044C },
 	};
 	value = value.toLower();
 	std::ranges::transform(value, std::begin(value), [&](const QChar& ch) {
@@ -142,7 +142,8 @@ QString& PrepareTitle(QString& value)
 			return QChar { it->second };
 
 		const auto category = ch.category();
-		if (category == QChar::Separator_Space || (category >= QChar::Punctuation_Connector && category <= QChar::Punctuation_Other))
+		if (IsOneOf(category, QChar::Separator_Space, QChar::Separator_Line, QChar::Separator_Paragraph, QChar::Other_Control)
+		    || (category >= QChar::Punctuation_Connector && category <= QChar::Punctuation_Other))
 			return QChar { 0x20 };
 
 		return ch;
