@@ -46,6 +46,7 @@ constexpr auto ARCHIVE_WILDCARD_OPTION_NAME = "archives";
 constexpr auto FOLDER                       = "folder";
 constexpr auto DUMP                         = "dump";
 constexpr auto HASH                         = "hash";
+constexpr auto HAMMING_THRESHOLD            = "hamming";
 
 using BookItem    = std::pair<QString, QString>;
 using Replacement = std::unordered_map<BookItem, BookItem, Util::PairHash<QString, QString>>;
@@ -57,6 +58,7 @@ struct Settings
 	QStringList arguments;
 	QString     logFileName;
 	QString     dumpWildCards;
+	int         hammingThreshold { 10 };
 };
 
 class UniqueFileConflictResolver final : public UniqueFileStorage::IUniqueFileConflictResolver
@@ -202,7 +204,6 @@ private:
 
 		auto hashText = id;
 
-
 		m_uniqueFileStorage.Add(
 			std::move(id),
 			UniqueFile {
@@ -327,6 +328,7 @@ Settings ProcessCommandLine(const QCoreApplication& app)
 			{ { "o", FOLDER }, "Output folder (required)", FOLDER },
 			{ DUMP, "Dump database wildcards", "Semicolon separated wildcard list" },
 			{ HASH, "Hash output folder", QString("%1 [output_folder/%2]").arg(FOLDER, HASH) },
+			{ HAMMING_THRESHOLD, "Hamming distance threshold", QString("number [0, 64] [%1]").arg(settings.hammingThreshold) },
     }
 	);
 
@@ -342,6 +344,8 @@ Settings ProcessCommandLine(const QCoreApplication& app)
 	settings.outputDir     = QDir { parser.value(FOLDER) };
 	settings.hashDir       = QDir { parser.isSet(HASH) ? parser.value(HASH) : settings.outputDir.absoluteFilePath(HASH) };
 	settings.dumpWildCards = parser.value(DUMP);
+	if (parser.isSet(HAMMING_THRESHOLD))
+		settings.hammingThreshold = parser.value(HAMMING_THRESHOLD).toInt();
 
 	return settings;
 }
@@ -353,7 +357,7 @@ void run(const Settings& settings)
 
 	auto inpDataProvider = std::make_shared<InpDataProvider>(settings.dumpWildCards);
 
-	UniqueFileStorage uniqueFileStorage(settings.hashDir.absolutePath(), inpDataProvider);
+	UniqueFileStorage uniqueFileStorage(settings.hashDir.absolutePath(), settings.hammingThreshold, inpDataProvider);
 
 	const auto conflictResolver = std::make_shared<UniqueFileConflictResolver>(*inpDataProvider);
 	uniqueFileStorage.SetConflictResolver(conflictResolver);
@@ -361,6 +365,8 @@ void run(const Settings& settings)
 	Replacement replacement;
 	uniqueFileStorage.SetDuplicateObserver(std::make_unique<DuplicateObserver>(replacement));
 	GetReplacement(totalFileCount, archives, uniqueFileStorage, *inpDataProvider);
+
+	PLOGI << "Duplicates found: " << replacement.size();
 
 	MergeArchives(settings.outputDir, settings.hashDir, archives, replacement);
 }
