@@ -151,7 +151,7 @@ private:
 	Replacement& m_replacement;
 };
 
-class ReplacementGetter : HashParser::IObserver
+class ReplacementGetter final : HashParser::IObserver
 {
 public:
 	ReplacementGetter(const Archive& archive, UniqueFileStorage& uniqueFileStorage, InpDataProvider& inpDataProvider, Util::Progress& progress)
@@ -174,7 +174,7 @@ private:
 		m_inpDataProvider.SetSourceLib(sourceLib);
 	}
 
-	void OnBookParsed(
+	bool OnBookParsed(
 #define HASH_PARSER_CALLBACK_ITEM(NAME) [[maybe_unused]] QString NAME,
 		HASH_PARSER_CALLBACK_ITEMS_X_MACRO
 #undef HASH_PARSER_CALLBACK_ITEM
@@ -184,7 +184,7 @@ private:
 	) override
 	{
 		if (!originFolder.isEmpty())
-			return;
+			return true;
 
 		m_progress.Increment(1, file.toStdString());
 
@@ -194,7 +194,7 @@ private:
 		});
 
 		if (!m_bookFiles.contains(file))
-			return;
+			return true;
 
 		UniqueFile::Uid uid { .folder = m_fileInfo.fileName(), .file = file };
 		if (const auto* book = m_inpDataProvider.SetFile(uid, id))
@@ -216,6 +216,8 @@ private:
 				.order    = QFileInfo(file).baseName().toInt(),
         }
 		);
+
+		return true;
 	}
 
 private:

@@ -59,7 +59,7 @@ struct HashParser
 	public:
 		virtual ~IObserver()                                  = default;
 		virtual void OnParseStarted(const QString& sourceLib) = 0;
-		virtual void OnBookParsed(
+		virtual bool OnBookParsed(
 #define HASH_PARSER_CALLBACK_ITEM(NAME) QString NAME,
 			HASH_PARSER_CALLBACK_ITEMS_X_MACRO
 #undef HASH_PARSER_CALLBACK_ITEM
@@ -163,7 +163,7 @@ public:
 
 private:
 	void OnParseStarted(const QString& sourceLib) override;
-	void OnBookParsed(
+	bool OnBookParsed(
 #define HASH_PARSER_CALLBACK_ITEM(NAME) QString NAME,
 		HASH_PARSER_CALLBACK_ITEMS_X_MACRO
 #undef HASH_PARSER_CALLBACK_ITEM

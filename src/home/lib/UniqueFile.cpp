@@ -85,14 +85,15 @@ private: // Util::SaxParser
 		if (path == BOOK)
 		{
 			assert(!m_id.isEmpty());
-			m_observer.OnBookParsed(
+			if (!m_observer.OnBookParsed(
 #define HASH_PARSER_CALLBACK_ITEM(NAME) std::move(m_##NAME),
-				HASH_PARSER_CALLBACK_ITEMS_X_MACRO
+					HASH_PARSER_CALLBACK_ITEMS_X_MACRO
 #undef HASH_PARSER_CALLBACK_ITEM
-					std::move(m_cover),
-				std::move(m_images),
-				std::move(m_section)
-			);
+						std::move(m_cover),
+					std::move(m_images),
+					std::move(m_section)
+				))
+				return false;
 
 #define HASH_PARSER_CALLBACK_ITEM(NAME) m_##NAME = {};
 			HASH_PARSER_CALLBACK_ITEMS_X_MACRO
@@ -612,7 +613,7 @@ void UniqueFileStorage::OnParseStarted(const QString& sourceLib)
 	m_inpDataProvider->SetSourceLib(sourceLib);
 }
 
-void UniqueFileStorage::OnBookParsed(
+bool UniqueFileStorage::OnBookParsed(
 #define HASH_PARSER_CALLBACK_ITEM(NAME) QString NAME,
 	HASH_PARSER_CALLBACK_ITEMS_X_MACRO
 #undef HASH_PARSER_CALLBACK_ITEM
@@ -622,7 +623,7 @@ void UniqueFileStorage::OnBookParsed(
 )
 {
 	if (!originFolder.isEmpty())
-		return;
+		return true;
 
 	decltype(UniqueFile::images) imageItems;
 	std::ranges::transform(std::move(images) | std::views::as_rvalue, std::inserter(imageItems, imageItems.end()), [](auto&& item) {
@@ -646,6 +647,8 @@ void UniqueFileStorage::OnBookParsed(
 	};
 	uniqueFile.order = QFileInfo(uniqueFile.uid.file).baseName().toInt();
 	m_old.emplace(std::move(id), std::move(uniqueFile));
+
+	return true;
 }
 
 void HashParser::Parse(QIODevice& input, IObserver& observer)
