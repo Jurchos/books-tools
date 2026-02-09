@@ -30,14 +30,16 @@ struct ImageHashItem
 	uint64_t   pHash { 0 };
 };
 
+using ImageHashItems = std::vector<ImageHashItem>;
+
 struct BookHashItem
 {
-	QString                    folder;
-	QString                    file;
-	QByteArray                 body;
-	ImageHashItem              cover;
-	std::vector<ImageHashItem> images;
-	HashParseResult            parseResult;
+	QString         folder;
+	QString         file;
+	QByteArray      body;
+	ImageHashItem   cover;
+	ImageHashItems  images;
+	HashParseResult parseResult;
 };
 
 class LIB_EXPORT BookHashItemProvider
