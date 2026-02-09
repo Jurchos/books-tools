@@ -2,8 +2,6 @@
 
 #include <condition_variable>
 #include <queue>
-#include <ranges>
-#include <set>
 
 #include <QCommandLineParser>
 #include <QDir>
@@ -190,25 +188,14 @@ void ProcessArchive(const Options& options, const QString& filePath, Util::Progr
 {
 	PLOGI << "process " << filePath;
 	assert(options.dstDir.exists());
-	Zip       zip(filePath);
+	BookHashItemProvider bookHashItemProvider(filePath);
 	QFileInfo fileInfo(filePath);
-
-	const auto getZip = [&](const char* type) -> std::unique_ptr<Zip> {
-		const auto path = fileInfo.dir().absoluteFilePath(QString("%1/%2.zip").arg(type, fileInfo.completeBaseName()));
-		return QFile::exists(path) ? std::make_unique<Zip>(path) : std::unique_ptr<Zip> {};
-	};
-
-	const auto coversZip = getZip(Global::COVERS);
-	const auto imagesZip = getZip(Global::IMAGES);
-
-	const auto covers = (coversZip ? coversZip->GetFileNameList() : QStringList {}) | std::ranges::to<std::set<QString>>();
-	const auto images = (imagesZip ? imagesZip->GetFileNameList() : QStringList {}) | std::ranges::to<std::set<QString>>();
 
 	QFile output(options.dstDir.filePath(fileInfo.completeBaseName() + ".xml"));
 	if (!output.open(QIODevice::WriteOnly))
 		throw std::ios_base::failure(std::format("Cannot create {}", options.dstDir.filePath(fileInfo.completeBaseName() + ".xml")));
 
-	const auto fileList = zip.GetFileNameList();
+	const auto fileList = bookHashItemProvider.GetFiles();
 
 	std::condition_variable_any queueCondition;
 	std::mutex                  queueGuard;
@@ -216,27 +203,7 @@ void ProcessArchive(const Options& options, const QString& filePath, Util::Progr
 
 	for (const auto& file : fileList)
 	{
-		BookHashItem bookTaskItem { .folder = fileInfo.fileName(), .file = file, .body = zip.Read(file)->GetStream().readAll() };
-
-		const auto baseName = QFileInfo(file).completeBaseName();
-		if (coversZip && covers.contains(baseName))
-			bookTaskItem.cover = { QString {}, coversZip->Read(baseName)->GetStream().readAll() };
-
-		if (imagesZip)
-			std::ranges::transform(
-				std::ranges::equal_range(
-					images,
-					baseName + "/",
-					{},
-					[n = baseName.length() + 1](const QString& item) {
-						return QStringView { item.begin(), std::next(item.begin(), n) };
-					}
-				),
-				std::back_inserter(bookTaskItem.images),
-				[&](const QString& item) {
-					return ImageHashItem { item.split("/").back(), imagesZip->Read(item)->GetStream().readAll() };
-				}
-			);
+		auto bookTaskItem = bookHashItemProvider.Get(file);
 
 		{
 			std::unique_lock lockStart(queueGuard);

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "hash.h"
+#include "flihash.h"
 
 #include "export/lib.h"
 
