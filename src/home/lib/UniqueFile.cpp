@@ -256,24 +256,38 @@ private: // UniqueFileStorage::ImageComparer
 				return ImagesCompareResult::Varied;
 		}
 
-		std::vector<uint64_t>             lpHashes;
-		std::unordered_multiset<uint64_t> rpHashes;
-		auto                              lIt = lhs.images.cbegin(), rIt = rhs.images.cbegin();
+		using ImageHashes = std::unordered_multimap<uint64_t, QString>;
+		using ImageHash   = std::pair<uint64_t, QString>;
+
+		const auto toIdList = [](const UniqueFile& f) {
+			return f.images | std::views::transform([](const auto& item) {
+					   return item.fileName;
+				   })
+			     | std::ranges::to<std::unordered_set<QString>>();
+		};
+		auto lIds = toIdList(lhs), rIds = toIdList(rhs);
+
+		ImageHashes lpHashes, rpHashes;
+
+		auto lIt = lhs.images.cbegin(), rIt = rhs.images.cbegin();
 		while (lIt != lhs.images.cend() && rIt != rhs.images.cend())
 		{
 			if (lIt->hash < rIt->hash)
 			{
-				lpHashes.emplace_back(lIt->pHash);
+				lpHashes.emplace(lIt->pHash, lIt->fileName);
 				++lIt;
 				continue;
 			}
 
 			if (lIt->hash > rIt->hash)
 			{
-				rpHashes.emplace(rIt->pHash);
+				rpHashes.emplace(rIt->pHash, rIt->fileName);
 				++rIt;
 				continue;
 			}
+
+			lIds.erase(lIt->fileName);
+			rIds.erase(rIt->fileName);
 			++lIt;
 			++rIt;
 		}
@@ -281,34 +295,33 @@ private: // UniqueFileStorage::ImageComparer
 		if (!(lpHashes.empty() || rpHashes.empty()))
 		{
 			for (; lIt != lhs.images.cend(); ++lIt)
-				lpHashes.emplace_back(lIt->pHash);
+				lpHashes.emplace(lIt->pHash, lIt->fileName);
 			for (; rIt != rhs.images.cend(); ++rIt)
-				rpHashes.emplace(rIt->pHash);
-			erase_if(lpHashes, [&](const uint64_t lItem) {
-				if (lItem == 0)
-					return false;
-				if (const auto it = std::ranges::find_if(
-						rpHashes,
-						[&](const uint64_t rItem) {
-							return std::popcount(lItem ^ rItem) <= m_threshold;
-						}
-					);
-				    it != rpHashes.end())
-				{
-					rpHashes.erase(it);
-					return true;
-				}
-				return false;
-			});
+				rpHashes.emplace(rIt->pHash, rIt->fileName);
+
+			std::multimap<std::pair<int, int>, std::pair<ImageHash, ImageHash>> distances;
+			for (const auto& l : lpHashes)
+				for (const auto& r : rpHashes)
+					distances.emplace(std::make_pair(std::popcount(l.first ^ r.first), std::abs(l.second.toInt() - r.second.toInt())), std::make_pair(l, r));
+			distances.erase(distances.upper_bound(std::make_pair(m_threshold, 0)), distances.end());
+
+			for (const auto& [l, r] : distances | std::views::values)
+			{
+				if (!lIds.contains(l.second) || !rIds.contains(r.second))
+					continue;
+
+				lIds.erase(l.second);
+				rIds.erase(r.second);
+			}
 		}
 
-		if (!lpHashes.empty())
+		if (!lIds.empty())
 			result = result == ImagesCompareResult::Inner ? ImagesCompareResult::Varied : ImagesCompareResult::Outer;
 
 		if (result == ImagesCompareResult::Varied)
 			return result;
 
-		if (!rpHashes.empty())
+		if (!rIds.empty())
 			result = result == ImagesCompareResult::Outer ? ImagesCompareResult::Varied : ImagesCompareResult::Inner;
 
 		if (result == ImagesCompareResult::Varied)
