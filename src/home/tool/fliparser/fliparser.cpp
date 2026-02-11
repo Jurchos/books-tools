@@ -337,10 +337,14 @@ void CreateInpx(const Settings& settings, const Archives& archives, InpDataProvi
 													return std::make_pair(QFileInfo(item.filePath), item.sourceLib);
 												}))
 	{
-		PLOGV << zipFileInfo.fileName();
 		QByteArray file;
 		Zip        zip(zipFileInfo.filePath());
-		for (const auto& bookFile : zip.GetFileNameList())
+		const auto bookFiles = zip.GetFileNameList();
+
+		PLOGV << zipFileInfo.fileName() << ", files count: " << bookFiles.size();
+		size_t counter = 0;
+
+		for (const auto& bookFile : bookFiles)
 		{
 			auto* book = inpDataProvider.GetBook({ zipFileInfo.fileName(), bookFile });
 			if (book)
@@ -373,9 +377,15 @@ void CreateInpx(const Settings& settings, const Archives& archives, InpDataProvi
 			std::ranges::sort(series, {}, seriesOrdNumPredicate);
 
 			file << *book;
+			++counter;
 
 			maxTime = std::max(maxTime, zip.GetFileTime(bookFile));
 		}
+
+		if (static_cast<qsizetype>(counter) == bookFiles.size())
+			PLOGV << zipFileInfo.fileName() << ", books added: " << counter;
+		else
+			PLOGW << zipFileInfo.fileName() << ", not all books added: " << counter << " out of " << bookFiles.size();
 
 		if (!file.isEmpty())
 			zipFileController->AddFile(zipFileInfo.completeBaseName() + ".inp", std::move(file), QDateTime::currentDateTime());
@@ -750,25 +760,38 @@ int main(int argc, char* argv[])
 	Log::LoggingInitializer                          logging((parser.isSet(logOption) ? parser.value(logOption) : defaultLogPath).toStdWString());
 	plog::ConsoleAppender<Util::LogConsoleFormatter> consoleAppender;
 	Log::LogAppender                                 logConsoleAppender(&consoleAppender);
-	PLOGI << QString("%1 started").arg(APP_ID);
+	try
+	{
+		PLOGI << QString("%1 started").arg(APP_ID);
 
-	if (parser.positionalArguments().isEmpty() || !parser.isSet(OUTPUT))
-		parser.showHelp(1);
+		if (parser.positionalArguments().isEmpty() || !parser.isSet(OUTPUT))
+			parser.showHelp(1);
 
-	settings.outputFolder               = parser.value(OUTPUT).toStdWString();
-	settings.collectionInfoTemplateFile = parser.value(COLLECTION_INFO_TEMPLATE).toStdWString();
+		settings.outputFolder               = parser.value(OUTPUT).toStdWString();
+		settings.collectionInfoTemplateFile = parser.value(COLLECTION_INFO_TEMPLATE).toStdWString();
 
-	auto archives = GetArchives(parser.positionalArguments());
-	Total(archives);
+		auto archives = GetArchives(parser.positionalArguments());
+		Total(archives);
 
-	const auto inpDataProvider = std::make_shared<InpDataProvider>(parser.value(DUMP));
-	const auto replacement     = ReadHash(*inpDataProvider, archives);
+		const auto inpDataProvider = std::make_shared<InpDataProvider>(parser.value(DUMP));
+		const auto replacement     = ReadHash(*inpDataProvider, archives);
 
-	MergeBookData(*inpDataProvider, replacement);
-	CreateInpx(settings, archives, *inpDataProvider);
-	CreateBookList(settings.outputFolder, *inpDataProvider);
-	CreateReview(settings.outputFolder, *inpDataProvider, replacement);
-	ProcessCompilations(settings.outputFolder, archives, *inpDataProvider);
+		MergeBookData(*inpDataProvider, replacement);
+		CreateInpx(settings, archives, *inpDataProvider);
+		CreateBookList(settings.outputFolder, *inpDataProvider);
+		CreateReview(settings.outputFolder, *inpDataProvider, replacement);
+		ProcessCompilations(settings.outputFolder, archives, *inpDataProvider);
 
-	return 0;
+		return 0;
+	}
+	catch(const std::exception& ex)
+	{
+		PLOGE << ex.what();
+	}
+	catch (...)
+	{
+		PLOGE << "Unknown error";
+	}
+
+	return 1;
 }
