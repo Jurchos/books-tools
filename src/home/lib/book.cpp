@@ -54,6 +54,7 @@ QByteArray& operator<<(QByteArray& bytes, const Book& book)
 {
 	const auto rate      = std::llround(book.rate / book.rateCount);
 	const auto rateBytes = rate > 0 && rate <= 5 ? QString::number(rate).toUtf8() : QByteArray {};
+	assert(!book.series.empty());
 
 	for (const auto& [seriesTitle, serNo, type, level] : book.series)
 	{

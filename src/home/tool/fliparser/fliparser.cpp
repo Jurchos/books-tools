@@ -51,6 +51,7 @@ constexpr auto DUMP                         = "dump";
 constexpr auto OUTPUT                       = "output";
 constexpr auto FOLDER                       = "folder";
 constexpr auto PATH                         = "path";
+constexpr auto MAX_SERIES                   = "max-series-per-book";
 
 constexpr auto APP_ID = "fliparser";
 
@@ -61,6 +62,7 @@ struct Settings
 {
 	std::filesystem::path outputFolder;
 	std::filesystem::path collectionInfoTemplateFile;
+	ptrdiff_t             maxSeriesPerBook { std::numeric_limits<ptrdiff_t>::max() };
 };
 
 struct FileInfo
@@ -375,6 +377,16 @@ void CreateInpx(const Settings& settings, const Archives& archives, InpDataProvi
 			if (series.size() > 1 && series.back().title.isEmpty())
 				series.pop_back();
 			std::ranges::sort(series, {}, seriesOrdNumPredicate);
+
+			if (settings.maxSeriesPerBook > 0)
+			{
+				book->series.erase(std::next(book->series.begin(), std::min(settings.maxSeriesPerBook, std::ssize(book->series))), book->series.end());
+			}
+			else
+			{
+				book->series.clear();
+				book->series.emplace_back();
+			}
 
 			file << *book;
 			++counter;
@@ -748,9 +760,10 @@ int main(int argc, char* argv[])
 	parser.addPositionalArgument(ARCHIVE_WILDCARD_OPTION_NAME, "Input archives with hashes (required)");
 	parser.addOptions(
 		{
-			{				   { "o", OUTPUT }, "Output folder (required)",                              FOLDER },
-			{							  DUMP,  "Dump database wildcards", "Semicolon separated wildcard list" },
-			{ { "i", COLLECTION_INFO_TEMPLATE }, "Collection info template",                                PATH },
+			{				   { "o", OUTPUT }, "Output folder (required)",                                         FOLDER },
+			{							  DUMP,  "Dump database wildcards",            "Semicolon separated wildcard list" },
+			{ { "i", COLLECTION_INFO_TEMPLATE }, "Collection info template",                                           PATH },
+			{						MAX_SERIES,  "Maximum series per book", QString("[%1]").arg(settings.maxSeriesPerBook) },
     }
 	);
 	const auto defaultLogPath = QString("%1/%2.%3.log").arg(QStandardPaths::writableLocation(QStandardPaths::TempLocation), COMPANY_ID, APP_ID);
@@ -769,6 +782,8 @@ int main(int argc, char* argv[])
 
 		settings.outputFolder               = parser.value(OUTPUT).toStdWString();
 		settings.collectionInfoTemplateFile = parser.value(COLLECTION_INFO_TEMPLATE).toStdWString();
+		if (parser.isSet(MAX_SERIES))
+			settings.maxSeriesPerBook = parser.value(MAX_SERIES).toLongLong();
 
 		auto archives = GetArchives(parser.positionalArguments());
 		Total(archives);
@@ -784,7 +799,7 @@ int main(int argc, char* argv[])
 
 		return 0;
 	}
-	catch(const std::exception& ex)
+	catch (const std::exception& ex)
 	{
 		PLOGE << ex.what();
 	}
