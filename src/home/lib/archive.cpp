@@ -44,6 +44,8 @@ Archives GetArchives(const QStringList& wildCards)
 				return result;
 			}) | std::views::transform([&](const QFileInfo& item) {
 				auto hashPath = hashFolder.filePath(item.completeBaseName()) + ".xml";
+				if (!QFile::exists(hashPath))
+					throw std::invalid_argument(std::format("{} not found", hashPath));
 				return Archive { item.absoluteFilePath(), std::move(hashPath) };
 			}) | std::views::filter([](const Archive& item) {
 				return QFile::exists(item.hashPath);
