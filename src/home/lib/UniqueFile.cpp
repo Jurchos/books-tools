@@ -8,12 +8,10 @@
 
 #include "dump/Factory.h"
 #include "dump/IDump.h"
+#include "util/StrUtil.h"
 #include "util/files.h"
-#include "util/xml/SaxParser.h"
-#include "util/xml/XmlAttributes.h"
 #include "util/xml/XmlWriter.h"
 
-#include "Constant.h"
 #include "book.h"
 #include "log.h"
 #include "util.h"
@@ -23,123 +21,6 @@ using namespace HomeCompa;
 
 namespace
 {
-
-class HashParserImpl final : public Util::SaxParser
-{
-	static constexpr auto BOOKS     = "books";
-	static constexpr auto BOOK      = "books/book";
-	static constexpr auto COVER     = "books/book/cover";
-	static constexpr auto IMAGE     = "books/book/image";
-	static constexpr auto ORIGIN    = "books/book/origin";
-	static constexpr auto HISTOGRAM = "books/book/histogram/item";
-	static constexpr auto SECTION   = "section";
-
-public:
-	HashParserImpl(QIODevice& input, HashParser::IObserver& observer)
-		: SaxParser(input, 512)
-		, m_observer { observer }
-	{
-		Parse();
-	}
-
-private: // Util::SaxParser
-	bool OnStartElement(const QString& name, const QString& path, const Util::XmlAttributes& attributes) override
-	{
-		if (path == BOOKS)
-		{
-			m_observer.OnParseStarted(attributes.GetAttribute("source"));
-		}
-		else if (path == BOOK)
-		{
-#define HASH_PARSER_CALLBACK_ITEM(NAME) m_##NAME = attributes.GetAttribute(#NAME);
-			HASH_PARSER_CALLBACK_ITEMS_X_MACRO
-#undef HASH_PARSER_CALLBACK_ITEM
-			m_section        = std::make_unique<Section>();
-			m_currentSection = m_section.get();
-		}
-		else if (path == ORIGIN)
-		{
-			m_originFolder = attributes.GetAttribute(Inpx::FOLDER);
-			m_originFile   = attributes.GetAttribute(Inpx::FILE);
-		}
-		else if (name == SECTION)
-		{
-			auto& section    = m_currentSection->children.try_emplace(attributes.GetAttribute("id"), std::make_unique<Section>()).first->second;
-			section->count   = attributes.GetAttribute("count").toULongLong();
-			section->parent  = m_currentSection;
-			m_currentSection = section.get();
-		}
-		else if (path == COVER)
-		{
-			m_cover.pHash = attributes.GetAttribute("pHash");
-		}
-		else if (path == IMAGE)
-		{
-			m_images.emplace_back(attributes.GetAttribute("id"), QString(), attributes.GetAttribute("pHash"));
-		}
-		else if (path == HISTOGRAM)
-		{
-			m_textHistogram.emplace_back(attributes.GetAttribute("count").toULongLong(), attributes.GetAttribute("word"));
-		}
-
-		return true;
-	}
-
-	bool OnEndElement(const QString& name, const QString& path) override
-	{
-		if (path == BOOK)
-		{
-			assert(!m_id.isEmpty());
-			if (!m_observer.OnBookParsed(
-#define HASH_PARSER_CALLBACK_ITEM(NAME) std::move(m_##NAME),
-					HASH_PARSER_CALLBACK_ITEMS_X_MACRO
-#undef HASH_PARSER_CALLBACK_ITEM
-						std::move(m_cover),
-					std::move(m_images),
-					std::move(m_section),
-					std::move(m_textHistogram)
-				))
-				return false;
-
-#define HASH_PARSER_CALLBACK_ITEM(NAME) m_##NAME = {};
-			HASH_PARSER_CALLBACK_ITEMS_X_MACRO
-#undef HASH_PARSER_CALLBACK_ITEM
-
-			m_cover          = {};
-			m_images         = {};
-			m_section        = {};
-			m_textHistogram  = {};
-			m_currentSection = nullptr;
-		}
-		else if (name == SECTION)
-		{
-			m_currentSection = m_currentSection->parent;
-		}
-
-		return true;
-	}
-
-	bool OnCharacters(const QString& path, const QString& value) override
-	{
-		if (path == COVER)
-			m_cover.hash = value;
-		else if (path == IMAGE)
-			m_images.back().hash = value;
-		return true;
-	}
-
-private:
-	HashParser::IObserver& m_observer;
-#define HASH_PARSER_CALLBACK_ITEM(NAME) QString m_##NAME;
-	HASH_PARSER_CALLBACK_ITEMS_X_MACRO
-#undef HASH_PARSER_CALLBACK_ITEM
-
-	HashParser::HashImageItem              m_cover;
-	std::vector<HashParser::HashImageItem> m_images;
-	Section::Ptr                           m_section;
-	Section*                               m_currentSection { nullptr };
-	TextHistogram                          m_textHistogram;
-};
 
 class ISerializer // NOLINT(cppcoreguidelines-special-member-functions)
 {
@@ -461,7 +342,7 @@ UniqueFileStorage::UniqueFileStorage(QString dstDir, const int hammingThreshold,
 		if (!file.open(QIODevice::ReadOnly))
 			continue;
 
-		HashParser::Parse(file, *this);
+		Util::HashParser::Parse(file, *this);
 	}
 
 	PLOGI << "ready books found: " << m_old.size();
@@ -632,10 +513,10 @@ bool UniqueFileStorage::OnBookParsed(
 #define HASH_PARSER_CALLBACK_ITEM(NAME) QString NAME,
 	HASH_PARSER_CALLBACK_ITEMS_X_MACRO
 #undef HASH_PARSER_CALLBACK_ITEM
-		HashParser::HashImageItem cover,
-	HashParser::HashImageItems    images,
-	Section::Ptr,
-	TextHistogram
+		Util::HashParser::HashImageItem cover,
+	Util::HashParser::HashImageItems    images,
+	Util::HashParser::Section::Ptr,
+	Util::TextHistogram
 )
 {
 	if (!originFolder.isEmpty())
@@ -650,7 +531,7 @@ bool UniqueFileStorage::OnBookParsed(
 
 	if (const auto* book = m_inpDataProvider->SetFile(uid, id))
 		title.append(" ").append(book->title);
-	SimplifyTitle(PrepareTitle(title));
+	Util::SimplifyTitle(Util::PrepareTitle(title));
 	auto split = title.split(' ', Qt::SkipEmptyParts);
 
 	UniqueFile uniqueFile {
@@ -665,9 +546,4 @@ bool UniqueFileStorage::OnBookParsed(
 	m_old.emplace(std::move(id), std::move(uniqueFile));
 
 	return true;
-}
-
-void HashParser::Parse(QIODevice& input, IObserver& observer)
-{
-	[[maybe_unused]] const HashParserImpl parser(input, observer);
 }

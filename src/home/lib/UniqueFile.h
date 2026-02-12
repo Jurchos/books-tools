@@ -5,9 +5,10 @@
 #include "fnd/NonCopyMovable.h"
 #include "fnd/algorithm.h"
 
+#include "util/bookhash/hashparser.h"
+
 #include "ImageItem.h"
 #include "book.h"
-#include "flihash.h"
 #include "util.h"
 
 #include "export/lib.h"
@@ -35,45 +36,6 @@ struct LIB_EXPORT UniqueFile
 
 	QString GetTitle() const;
 	void    ClearImages();
-};
-
-struct HashParser
-{
-#define HASH_PARSER_CALLBACK_ITEMS_X_MACRO  \
-	HASH_PARSER_CALLBACK_ITEM(id)           \
-	HASH_PARSER_CALLBACK_ITEM(hash)         \
-	HASH_PARSER_CALLBACK_ITEM(folder)       \
-	HASH_PARSER_CALLBACK_ITEM(file)         \
-	HASH_PARSER_CALLBACK_ITEM(title)        \
-	HASH_PARSER_CALLBACK_ITEM(originFolder) \
-	HASH_PARSER_CALLBACK_ITEM(originFile)
-
-	struct HashImageItem
-	{
-		QString id;
-		QString hash;
-		QString pHash;
-	};
-
-	using HashImageItems = std::vector<HashImageItem>;
-
-	class IObserver // NOLINT(cppcoreguidelines-special-member-functions)
-	{
-	public:
-		virtual ~IObserver()                                  = default;
-		virtual void OnParseStarted(const QString& sourceLib) = 0;
-		virtual bool OnBookParsed(
-#define HASH_PARSER_CALLBACK_ITEM(NAME) QString NAME,
-			HASH_PARSER_CALLBACK_ITEMS_X_MACRO
-#undef HASH_PARSER_CALLBACK_ITEM
-				HashImageItem cover,
-			HashImageItems    images,
-			Section::Ptr      section,
-			TextHistogram     textHistogram
-		) = 0;
-	};
-
-	LIB_EXPORT static void Parse(QIODevice& input, IObserver& observer);
 };
 
 class LIB_EXPORT InpDataProvider
@@ -111,7 +73,7 @@ private:
 	std::vector<Book*>     m_books;
 };
 
-class LIB_EXPORT UniqueFileStorage final : HashParser::IObserver
+class LIB_EXPORT UniqueFileStorage final : Util::HashParser::IObserver
 {
 	struct Dup
 	{
@@ -171,10 +133,10 @@ private:
 #define HASH_PARSER_CALLBACK_ITEM(NAME) QString NAME,
 		HASH_PARSER_CALLBACK_ITEMS_X_MACRO
 #undef HASH_PARSER_CALLBACK_ITEM
-			HashParser::HashImageItem cover,
-		HashParser::HashImageItems    images,
-		Section::Ptr                  section,
-		TextHistogram                 textHistogram
+			Util::HashParser::HashImageItem cover,
+		Util::HashParser::HashImageItems    images,
+		Util::HashParser::Section::Ptr      section,
+		Util::TextHistogram                 textHistogram
 	) override;
 
 private:

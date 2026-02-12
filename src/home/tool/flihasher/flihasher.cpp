@@ -11,11 +11,12 @@
 #include <plog/Appenders/ConsoleAppender.h>
 
 #include "lib/dump/Factory.h"
-#include "lib/hashfb2.h"
 #include "lib/util.h"
 #include "logging/LogAppender.h"
 #include "logging/init.h"
 #include "util/LogConsoleFormatter.h"
+#include "util/StrUtil.h"
+#include "util/bookhash/hashfb2.h"
 #include "util/files.h"
 #include "util/progress.h"
 #include "util/xml/Initializer.h"
@@ -28,6 +29,7 @@
 #include "config/version.h"
 
 using namespace HomeCompa::FliLib;
+using namespace HomeCompa::Util;
 using namespace HomeCompa;
 
 namespace
@@ -62,7 +64,7 @@ public:
 	};
 
 public:
-	Worker(IObserver& observer, std::condition_variable_any& queueCondition, std::mutex& queueGuard, std::queue<BookHashItem>& queue, std::atomic<unsigned int>& queueSize, Util::Progress& progress)
+	Worker(IObserver& observer, std::condition_variable_any& queueCondition, std::mutex& queueGuard, std::queue<BookHashItem>& queue, std::atomic<unsigned int>& queueSize, Progress& progress)
 		: m_observer { observer }
 		, m_queueCondition { queueCondition }
 		, m_queueGuard { queueGuard }
@@ -124,14 +126,14 @@ private:
 	std::queue<BookHashItem>&    m_queue;
 	std::atomic<unsigned int>&   m_queueSize;
 	std::jthread                 m_thread { std::bind_front(&Worker::Work, this) };
-	Util::Progress&              m_progress;
+	Progress&                    m_progress;
 	std::vector<BookHashItem>    m_results;
 };
 
 class TaskProcessor final : public Worker::IObserver
 {
 public:
-	TaskProcessor(std::condition_variable_any& queueCondition, std::mutex& queueGuard, const unsigned int poolSize, Util::Progress& progress)
+	TaskProcessor(std::condition_variable_any& queueCondition, std::mutex& queueGuard, const unsigned int poolSize, Progress& progress)
 		: m_queueCondition { queueCondition }
 		, m_queueGuard { queueGuard }
 		, m_workers { std::views::iota(0u, poolSize) | std::views::transform([&](const auto) {
@@ -184,12 +186,12 @@ private:
 	std::vector<BookHashItem>            m_results;
 };
 
-void ProcessArchive(const Options& options, const QString& filePath, Util::Progress& progress)
+void ProcessArchive(const Options& options, const QString& filePath, Progress& progress)
 {
 	PLOGI << "process " << filePath;
 	assert(options.dstDir.exists());
 	BookHashItemProvider bookHashItemProvider(filePath);
-	QFileInfo fileInfo(filePath);
+	QFileInfo            fileInfo(filePath);
 
 	QFile output(options.dstDir.filePath(fileInfo.completeBaseName() + ".xml"));
 	if (!output.open(QIODevice::WriteOnly))
@@ -215,8 +217,8 @@ void ProcessArchive(const Options& options, const QString& filePath, Util::Progr
 		processor.Enqueue(std::move(bookTaskItem));
 	}
 
-	Util::XmlWriter writer(output);
-	const auto      booksGuard = writer.Guard("books");
+	XmlWriter  writer(output);
+	const auto booksGuard = writer.Guard("books");
 	booksGuard->WriteAttribute("source", options.sourceLib);
 
 	PLOGV << "writing results";
@@ -259,7 +261,7 @@ QStringList GetArchives(const QStringList& wildCards)
 	QStringList result;
 
 	for (const auto& wildCard : wildCards)
-		std::ranges::move(Util::ResolveWildcard(wildCard), std::back_inserter(result));
+		std::ranges::move(ResolveWildcard(wildCard), std::back_inserter(result));
 
 	return result;
 }
@@ -284,7 +286,7 @@ int run(const Options& options)
 		});
 		PLOGI << "Total file count: " << totalFileCount;
 
-		Util::Progress progress(totalFileCount, "parsing");
+		Progress progress(totalFileCount, "parsing");
 
 		for (const auto& archive : archives)
 			ProcessArchive(options, archive, progress);
@@ -309,7 +311,7 @@ int main(int argc, char* argv[])
 	const QGuiApplication app(argc, argv);
 	QCoreApplication::setApplicationName(APP_ID);
 	QCoreApplication::setApplicationVersion(PRODUCT_VERSION);
-	Util::XMLPlatformInitializer xmlPlatformInitializer;
+	XMLPlatformInitializer xmlPlatformInitializer;
 
 	const auto availableLibraries = Dump::GetAvailableLibraries();
 
@@ -331,9 +333,9 @@ int main(int argc, char* argv[])
 	const auto logOption      = Log::LoggingInitializer::AddLogFileOption(parser, defaultLogPath);
 	parser.process(app);
 
-	Log::LoggingInitializer                          logging((parser.isSet(logOption) ? parser.value(logOption) : defaultLogPath).toStdWString());
-	plog::ConsoleAppender<Util::LogConsoleFormatter> consoleAppender;
-	Log::LogAppender                                 logConsoleAppender(&consoleAppender);
+	Log::LoggingInitializer                    logging((parser.isSet(logOption) ? parser.value(logOption) : defaultLogPath).toStdWString());
+	plog::ConsoleAppender<LogConsoleFormatter> consoleAppender;
+	Log::LogAppender                           logConsoleAppender(&consoleAppender);
 	PLOGI << QString("%1 started").arg(APP_ID);
 
 	if (!parser.isSet(OUTPUT) || parser.positionalArguments().isEmpty())

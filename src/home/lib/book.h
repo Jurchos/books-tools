@@ -23,14 +23,6 @@ struct Series
 	double  level { 0 };
 };
 
-struct Section
-{
-	Section* parent { nullptr };
-	size_t   count { 0 };
-	using Ptr = std::unique_ptr<Section>;
-	std::unordered_map<QString, Ptr> children;
-};
-
 struct Book
 {
 	QString             author;
@@ -59,7 +51,5 @@ struct Book
 };
 
 LIB_EXPORT QByteArray& operator<<(QByteArray& bytes, const Book& book);
-LIB_EXPORT QString&    SimplifyTitle(QString& value);
-LIB_EXPORT QString&    PrepareTitle(QString& value);
 
 } // namespace HomeCompa::FliLib

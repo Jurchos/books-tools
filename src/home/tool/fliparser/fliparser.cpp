@@ -27,6 +27,8 @@
 #include "logging/init.h"
 #include "util/Fb2InpxParser.h"
 #include "util/LogConsoleFormatter.h"
+#include "util/StrUtil.h"
+#include "util/bookhash/hashparser.h"
 #include "util/executor/ThreadPool.h"
 #include "util/language.h"
 #include "util/progress.h"
@@ -71,7 +73,7 @@ struct FileInfo
 	qsizetype  size;
 };
 
-class FileHashParser final : HashParser::IObserver
+class FileHashParser final : Util::HashParser::IObserver
 {
 public:
 	FileHashParser(Archive& archive, InpDataProvider& inpDataProvider, Replacement& replacement)
@@ -82,7 +84,7 @@ public:
 		QFile file(archive.hashPath);
 		if (!file.open(QIODevice::ReadOnly))
 			throw std::invalid_argument(std::format("Cannot read from {}", archive.hashPath));
-		HashParser::Parse(file, *this);
+		Util::HashParser::Parse(file, *this);
 	}
 
 private: // HashParser::IObserver
@@ -96,10 +98,10 @@ private: // HashParser::IObserver
 #define HASH_PARSER_CALLBACK_ITEM(NAME) [[maybe_unused]] QString NAME,
 		HASH_PARSER_CALLBACK_ITEMS_X_MACRO
 #undef HASH_PARSER_CALLBACK_ITEM
-			HashParser::HashImageItem /*cover*/,
-		HashParser::HashImageItems /*images*/,
-		Section::Ptr,
-		TextHistogram
+			Util::HashParser::HashImageItem /*cover*/,
+		Util::HashParser::HashImageItems /*images*/,
+		Util::HashParser::Section::Ptr,
+		Util::TextHistogram
 	) override
 	{
 		UniqueFile::Uid uid { folder, file };
@@ -117,7 +119,7 @@ private:
 	Replacement&     m_replacement;
 };
 
-class CompilationHandler final : HashParser::IObserver
+class CompilationHandler final : Util::HashParser::IObserver
 {
 public:
 	CompilationHandler(const Archives& archives, const InpDataProvider& inpDataProvider)
@@ -136,7 +138,8 @@ public:
 			QFile file(archive.hashPath);
 			if (!file.open(QIODevice::ReadOnly))
 				throw std::invalid_argument(std::format("Cannot read from {}", archive.hashPath));
-			HashParser::Parse(file, *this);
+
+			Util::HashParser::Parse(file, *this);
 			m_progress.Increment(1, QFileInfo(archive.hashPath).fileName().toStdString());
 		}
 	}
@@ -159,16 +162,17 @@ private: // HashParser::IObserver
 #define HASH_PARSER_CALLBACK_ITEM(NAME) [[maybe_unused]] QString NAME,
 		HASH_PARSER_CALLBACK_ITEMS_X_MACRO
 #undef HASH_PARSER_CALLBACK_ITEM
-			HashParser::HashImageItem /*cover*/,
-		HashParser::HashImageItems /*images*/,
-		Section::Ptr section,
-		TextHistogram
+			Util::HashParser::HashImageItem /*cover*/,
+		Util::HashParser::HashImageItems /*images*/,
+		Util::HashParser::Section::Ptr section,
+		Util::TextHistogram
 	) override
 	{
 		if (!originFolder.isEmpty())
 			return true;
 
-		const auto enumerate = [this](const Book* book, const Section& parent, QJsonArray& found, std::unordered_set<QString>& idNotFound, std::unordered_set<QString>& idFound, const auto& r) -> void {
+		const auto enumerate =
+			[this](const Book* book, const Util::HashParser::Section& parent, QJsonArray& found, std::unordered_set<QString>& idNotFound, std::unordered_set<QString>& idFound, const auto& r) -> void {
 			for (const auto& [childId, child] : parent.children)
 			{
 				if (child->count < 100)

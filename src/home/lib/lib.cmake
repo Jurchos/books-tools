@@ -5,7 +5,6 @@ AddTarget(lib	shared_lib
 	LINK_LIBRARIES
 		Qt${QT_MAJOR_VERSION}::Core
 		Qt${QT_MAJOR_VERSION}::Gui
-		cimg::cimg
 	LINK_TARGETS
 		dbfactory
 		logging

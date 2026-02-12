@@ -3,9 +3,6 @@
 #include <unordered_set>
 
 #include <QCommandLineParser>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
 #include <QStandardPaths>
 
 #include <plog/Appenders/ConsoleAppender.h>
@@ -18,11 +15,12 @@
 #include "lib/book.h"
 #include "lib/dump/Factory.h"
 #include "lib/dump/IDump.h"
-#include "lib/util.h"
 #include "logging/LogAppender.h"
 #include "logging/init.h"
 #include "util/BookUtil.h"
 #include "util/LogConsoleFormatter.h"
+#include "util/StrUtil.h"
+#include "util/bookhash/hashparser.h"
 #include "util/progress.h"
 #include "util/xml/Initializer.h"
 #include "util/xml/SaxParser.h"
@@ -151,7 +149,7 @@ private:
 	Replacement& m_replacement;
 };
 
-class ReplacementGetter final : HashParser::IObserver
+class ReplacementGetter final : Util::HashParser::IObserver
 {
 public:
 	ReplacementGetter(const Archive& archive, UniqueFileStorage& uniqueFileStorage, InpDataProvider& inpDataProvider, Util::Progress& progress)
@@ -165,7 +163,7 @@ public:
 			throw std::invalid_argument(std::format("Cannot read from {}", archive.hashPath));
 
 		m_bookFiles = Zip(archive.filePath).GetFileNameList() | std::ranges::to<std::unordered_set<QString>>();
-		HashParser::Parse(file, *this);
+		Util::HashParser::Parse(file, *this);
 	}
 
 private:
@@ -178,10 +176,10 @@ private:
 #define HASH_PARSER_CALLBACK_ITEM(NAME) [[maybe_unused]] QString NAME,
 		HASH_PARSER_CALLBACK_ITEMS_X_MACRO
 #undef HASH_PARSER_CALLBACK_ITEM
-			HashParser::HashImageItem cover,
-		HashParser::HashImageItems    images,
-		Section::Ptr,
-		TextHistogram
+			Util::HashParser::HashImageItem cover,
+		Util::HashParser::HashImageItems    images,
+		Util::HashParser::Section::Ptr,
+		Util::TextHistogram
 	) override
 	{
 		if (!originFolder.isEmpty())
@@ -200,7 +198,7 @@ private:
 		UniqueFile::Uid uid { .folder = m_fileInfo.fileName(), .file = file };
 		if (const auto* book = m_inpDataProvider.SetFile(uid, id))
 			title.append(" ").append(book->title);
-		SimplifyTitle(PrepareTitle(title));
+		Util::SimplifyTitle(Util::PrepareTitle(title));
 		auto split = title.split(' ', Qt::SkipEmptyParts);
 
 		auto hashText = id;

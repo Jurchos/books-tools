@@ -15,10 +15,10 @@
 #include "database/interface/ITransaction.h"
 
 #include "database/factory/Factory.h"
+#include "util/StrUtil.h"
 
 #include "IDump.h"
 #include "log.h"
-#include "util.h"
 
 namespace HomeCompa::FliLib::Dump
 {

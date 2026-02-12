@@ -8,6 +8,7 @@
 #include <QRegularExpression>
 
 #include "util/files.h"
+#include "util/StrUtil.h"
 
 #include "log.h"
 #include "util.h"
