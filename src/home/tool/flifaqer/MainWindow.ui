@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>600</width>
+    <height>400</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>MainWindow</string>
+  </property>
+  <widget class="QWidget" name="centralWidget">
+   <layout class="QHBoxLayout">
+    <property name="leftMargin">
+     <number>0</number>
+    </property>
+    <property name="topMargin">
+     <number>0</number>
+    </property>
+    <property name="rightMargin">
+     <number>0</number>
+    </property>
+    <property name="bottomMargin">
+     <number>0</number>
+    </property>
+    <item>
+     <widget class="QSplitter" name="splitterV">
+      <property name="orientation">
+       <enum>Qt::Orientation::Horizontal</enum>
+      </property>
+      <widget class="QWidget" name="verticalLayoutWidget">
+       <layout class="QVBoxLayout" name="_2">
+        <item>
+         <widget class="QComboBox" name="language"/>
+        </item>
+        <item>
+         <widget class="QTreeView" name="navigatorView"/>
+        </item>
+       </layout>
+      </widget>
+      <widget class="QSplitter" name="splitterH">
+       <property name="orientation">
+        <enum>Qt::Orientation::Vertical</enum>
+       </property>
+       <widget class="HomeCompa::FliFaq::TranslationWidget" name="reference" native="true"/>
+       <widget class="HomeCompa::FliFaq::TranslationWidget" name="translation" native="true"/>
+      </widget>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="mainMenu">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>600</width>
+     <height>22</height>
+    </rect>
+   </property>
+   <widget class="QMenu" name="menuFile">
+    <property name="title">
+     <string>File</string>
+    </property>
+    <addaction name="actionSave"/>
+    <addaction name="actionExport"/>
+    <addaction name="separator"/>
+    <addaction name="actionExit"/>
+   </widget>
+   <addaction name="menuFile"/>
+  </widget>
+  <action name="actionExit">
+   <property name="text">
+    <string>E&amp;xit</string>
+   </property>
+   <property name="shortcut">
+    <string>Alt+X</string>
+   </property>
+   <property name="menuRole">
+    <enum>QAction::MenuRole::NoRole</enum>
+   </property>
+  </action>
+  <action name="actionSave">
+   <property name="text">
+    <string>&amp;Save</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+S</string>
+   </property>
+   <property name="menuRole">
+    <enum>QAction::MenuRole::NoRole</enum>
+   </property>
+  </action>
+  <action name="actionExport">
+   <property name="text">
+    <string>&amp;Export</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+E</string>
+   </property>
+   <property name="menuRole">
+    <enum>QAction::MenuRole::NoRole</enum>
+   </property>
+  </action>
+ </widget>
+ <layoutdefault spacing="6" margin="11"/>
+ <customwidgets>
+  <customwidget>
+   <class>HomeCompa::FliFaq::TranslationWidget</class>
+   <extends>QWidget</extends>
+   <header>TranslationWidget.h</header>
+   <container>1</container>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections>
+  <connection>
+   <sender>actionExit</sender>
+   <signal>triggered()</signal>
+   <receiver>MainWindow</receiver>
+   <slot>close()</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>-1</x>
+     <y>-1</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>299</x>
+     <y>199</y>
+    </hint>
+   </hints>
+  </connection>
+ </connections>
+</ui>
