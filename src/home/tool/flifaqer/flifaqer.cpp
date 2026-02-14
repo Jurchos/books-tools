@@ -1,16 +1,17 @@
+#include <ranges>
+
 #include <QApplication>
+#include <QDir>
 #include <QStandardPaths>
 #include <QStyleFactory>
-
-#include <ranges>
 
 #include <Hypodermic/Container.h>
 #include <Hypodermic/ContainerBuilder.h>
 
 #include "logging/init.h"
 #include "util/ISettings.h"
-#include "Constant.h"
 
+#include "Constant.h"
 #include "MainWindow.h"
 #include "di_app.h"
 #include "log.h"
@@ -55,7 +56,7 @@ int main(int argc, char* argv[])
 		const auto settings = container->resolve<ISettings>();
 		if (argc > 1)
 			settings->Set(Constant::INPUT_FILES, std::views::iota(1, argc) | std::views::transform([&](const int n) {
-													 return QString { argv[n] };
+													 return QDir::fromNativeSeparators(argv[n]);
 												 }) | std::ranges::to<QStringList>());
 
 		const auto mainWindow = container->resolve<QMainWindow>();

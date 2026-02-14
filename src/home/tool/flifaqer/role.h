@@ -17,6 +17,9 @@ struct Role
 		TranslationLanguage,
 		TranslationQuestion,
 		TranslationAnswer,
+		Title,
+		Head,
+		Tail,
 		Save,
 		Export,
 	};
