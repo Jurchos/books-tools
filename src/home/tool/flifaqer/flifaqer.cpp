@@ -2,11 +2,14 @@
 #include <QStandardPaths>
 #include <QStyleFactory>
 
+#include <ranges>
+
 #include <Hypodermic/Container.h>
 #include <Hypodermic/ContainerBuilder.h>
 
 #include "logging/init.h"
 #include "util/ISettings.h"
+#include "Constant.h"
 
 #include "MainWindow.h"
 #include "di_app.h"
@@ -50,6 +53,10 @@ int main(int argc, char* argv[])
 		PLOGD << "DI-container created";
 
 		const auto settings = container->resolve<ISettings>();
+		if (argc > 1)
+			settings->Set(Constant::INPUT_FILES, std::views::iota(1, argc) | std::views::transform([&](const int n) {
+													 return QString { argv[n] };
+												 }) | std::ranges::to<QStringList>());
 
 		const auto mainWindow = container->resolve<QMainWindow>();
 		mainWindow->show();
