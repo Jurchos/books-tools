@@ -264,14 +264,21 @@ QJsonArray SaveImpl(const QString& language, const Item& item)
 	for (const auto& child : item.children)
 	{
 		QJsonArray answer;
-		for (const auto& str : child->answer(language).split(STRING_SEPARATOR))
-			answer.append(str);
+		{
+			auto splitted = child->answer(language).split(STRING_SEPARATOR);
+			if (!splitted.isEmpty() && splitted.back().isEmpty())
+				splitted.pop_back();
+			for (const auto& str : splitted)
+				answer.append(str);
+		}
 
 		QJsonObject obj {
-			{       QUESTION, child->question(language) },
-			{         ANSWER,         std::move(answer) },
-			{ CHILDREN_FIRST,      child->childrenFirst },
+			{ QUESTION, child->question(language) },
 		};
+		if (!answer.isEmpty())
+			obj.insert(ANSWER, std::move(answer));
+		if (child->childrenFirst)
+			obj.insert(CHILDREN_FIRST, child->childrenFirst);
 
 		if (!child->children.empty())
 			obj.insert(ITEMS, SaveImpl(language, *child));
