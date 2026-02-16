@@ -2,14 +2,18 @@
 
 #include "MainWindow.h"
 
+#include <ranges>
+
 #include <QClipboard>
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QPlainTextEdit>
+#include <QStyleFactory>
 
 #include "util/GeometryRestorable.h"
 
 #include "AppConstant.h"
+#include "Constant.h"
 #include "di_app.h"
 #include "role.h"
 
@@ -121,6 +125,26 @@ public:
 		connect(m_ui.actionFontSizeDown, &QAction::triggered, &m_self, [=] {
 			incrementFontSize(-1);
 		});
+
+		const auto currentStyleName = QApplication::style()->name();
+
+		for (const auto& key : QStyleFactory::keys() | std::views::filter([](const QString& theme) {
+								   return theme.compare("windows11", Qt::CaseInsensitive);
+							   }))
+		{
+			auto* action = m_ui.menuTheme->addAction(key);
+			action->setCheckable(true);
+			if (currentStyleName.compare(key, Qt::CaseInsensitive) == 0)
+			{
+				action->setChecked(true);
+				action->setEnabled(false);
+				continue;
+			}
+			connect(action, &QAction::triggered, [this, key] {
+				m_settings->Set(Constant::THEME, key);
+				QCoreApplication::exit(Global::RESTART_APP);
+			});
+		}
 
 		m_self.setWindowTitle(QString("%1 %2").arg(APP_ID, PRODUCT_VERSION));
 		LoadGeometry();

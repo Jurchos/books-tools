@@ -42,7 +42,6 @@ int main(int argc, char* argv[])
 		QApplication app(argc, argv);
 		QCoreApplication::setApplicationName(PRODUCT_ID);
 		QCoreApplication::setApplicationVersion(PRODUCT_VERSION);
-		QApplication::setStyle(QStyleFactory::create("Fusion"));
 
 		Log::LoggingInitializer logging(QString("%1/%2.%3.log").arg(QStandardPaths::writableLocation(QStandardPaths::TempLocation), COMPANY_ID, APP_ID).toStdWString());
 
@@ -50,40 +49,53 @@ int main(int argc, char* argv[])
 		PLOGI << "Commit hash: " << GIT_HASH;
 		PLOGD << "QApplication created";
 
-		std::shared_ptr<Hypodermic::Container> container;
+		while (true)
 		{
-			Hypodermic::ContainerBuilder builder;
-			DiInit(builder, container);
+			std::shared_ptr<Hypodermic::Container> container;
+			{
+				Hypodermic::ContainerBuilder builder;
+				DiInit(builder, container);
+			}
+			PLOGD << "DI-container created";
+
+			const auto settings = container->resolve<ISettings>();
+			if (argc > 1)
+				settings->Set(Constant::INPUT_FILES, std::views::iota(1, argc) | std::views::transform([&](const int n) {
+														 return QDir::fromNativeSeparators(argv[n]);
+													 }) | std::ranges::to<QStringList>());
+
+			auto availableStyles = QStyleFactory::keys() | std::views::filter([](const QString& theme) {
+									   return theme.compare("windows11", Qt::CaseInsensitive);
+								   })
+			                     | std::ranges::to<QStringList>();
+			auto currentTheme = settings->Get(Constant::THEME).toString();
+			if (!availableStyles.contains(currentTheme))
+				currentTheme = availableStyles.isEmpty() ? QString() : availableStyles.front();
+			if (!currentTheme.isEmpty())
+				QApplication::setStyle(QStyleFactory::create(currentTheme));
+
+			try
+			{
+				const auto model = container->resolve<QAbstractItemModel>();
+				for (const auto& file : settings->Get(Constant::INPUT_FILES).toStringList())
+					model->setData({}, file, Role::AddFile);
+			}
+			catch (const std::exception& ex)
+			{
+				QMessageBox::critical(nullptr, Tr(Constant::ERROR), ex.what());
+			}
+
+			const auto mainWindow = container->resolve<QMainWindow>();
+			mainWindow->show();
+
+			if (const auto code = QApplication::exec(); code != Global::RESTART_APP)
+			{
+				PLOGI << "App finished with " << code;
+				return code;
+			}
+
+			PLOGI << "App restarted";
 		}
-		PLOGD << "DI-container created";
-
-		const auto settings = container->resolve<ISettings>();
-		if (argc > 1)
-			settings->Set(Constant::INPUT_FILES, std::views::iota(1, argc) | std::views::transform([&](const int n) {
-										   return QDir::fromNativeSeparators(argv[n]);
-									   }) | std::ranges::to<QStringList>());
-
-		try
-		{
-			const auto model = container->resolve<QAbstractItemModel>();
-			for (const auto& file : settings->Get(Constant::INPUT_FILES).toStringList())
-				model->setData({}, file, Role::AddFile);
-		}
-		catch (const std::exception& ex)
-		{
-			QMessageBox::critical(nullptr, Tr(Constant::ERROR), ex.what());
-		}
-
-		const auto mainWindow = container->resolve<QMainWindow>();
-		mainWindow->show();
-
-		if (const auto code = QApplication::exec(); code != Global::RESTART_APP)
-		{
-			PLOGI << "App finished with " << code;
-			return code;
-		}
-
-		PLOGI << "App restarted";
 	}
 	catch (const std::exception& ex)
 	{

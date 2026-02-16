@@ -4,6 +4,7 @@ namespace HomeCompa::FliFaq::Constant
 {
 
 inline constexpr auto INPUT_FILES = "files";
+inline constexpr auto THEME       = "theme";
 
 constexpr auto ERROR = QT_TRANSLATE_NOOP("flifaqer", "Error");
 

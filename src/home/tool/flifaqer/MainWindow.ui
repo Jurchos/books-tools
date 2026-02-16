@@ -36,14 +36,14 @@
         </item>
         <item>
          <widget class="QPlainTextEdit" name="replacements">
-          <property name="visible">
-           <bool>false</bool>
-          </property>
           <property name="sizePolicy">
            <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
             <horstretch>0</horstretch>
             <verstretch>0</verstretch>
            </sizepolicy>
+          </property>
+          <property name="visible">
+           <bool>false</bool>
           </property>
           <property name="lineWrapMode">
            <enum>QPlainTextEdit::LineWrapMode::NoWrap</enum>
@@ -143,7 +143,13 @@
       <addaction name="actionFontSizeUp"/>
       <addaction name="actionFontSizeDown"/>
      </widget>
+     <widget class="QMenu" name="menuTheme">
+      <property name="title">
+       <string>Theme</string>
+      </property>
+     </widget>
      <addaction name="menuFont"/>
+     <addaction name="menuTheme"/>
     </widget>
     <widget class="QMenu" name="menuExport">
      <property name="title">
@@ -244,6 +250,11 @@
    </property>
    <property name="menuRole">
     <enum>QAction::MenuRole::NoRole</enum>
+   </property>
+  </action>
+  <action name="actionasd">
+   <property name="text">
+    <string>asd</string>
    </property>
   </action>
  </widget>
