@@ -64,6 +64,12 @@ public:
 		m_ui.language->addItem(language, language);
 	}
 
+	void SetLanguage(const QString& language) const
+	{
+		if (const auto index = m_ui.language->findData(language); index >= 0)
+			m_ui.language->setCurrentIndex(index);
+	}
+
 	void SetCurrentIndex(const QModelIndex& index)
 	{
 		if (!index.isValid())
@@ -112,6 +118,11 @@ void TranslationWidget::SetMode(const Mode mode)
 void TranslationWidget::AddLanguage(const QString& language) const
 {
 	m_impl->AddLanguage(language);
+}
+
+void TranslationWidget::SetLanguage(const QString& language) const
+{
+	m_impl->SetLanguage(language);
 }
 
 void TranslationWidget::SetCurrentIndex(const QModelIndex& index)

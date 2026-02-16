@@ -9,7 +9,8 @@ struct Role
 {
 	enum
 	{
-		LanguageList = Qt::UserRole,
+		AddFile = Qt::UserRole,
+		LanguageList,
 		Language,
 		ReferenceLanguage,
 		ReferenceQuestion,
@@ -17,9 +18,7 @@ struct Role
 		TranslationLanguage,
 		TranslationQuestion,
 		TranslationAnswer,
-		Title,
-		Head,
-		Tail,
+		Macro,
 		Save,
 		Export,
 	};

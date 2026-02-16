@@ -17,7 +17,7 @@
 
 #include "util/StrUtil.h"
 
-#include "Constant.h"
+#include "AppConstant.h"
 #include "di_app.h"
 #include "log.h"
 #include "role.h"
@@ -28,23 +28,17 @@ using namespace HomeCompa;
 namespace
 {
 
-constexpr auto LANGUAGE       = "language";
-constexpr auto TITLE          = "title";
-constexpr auto HEAD           = "head";
-constexpr auto TAIL           = "tail";
-constexpr auto QUESTION       = "q";
-constexpr auto ANSWER         = "t";
-constexpr auto CHILDREN_FIRST = "v";
-constexpr auto ITEMS          = "x";
+constexpr auto LANGUAGE = "language";
+constexpr auto MACRO    = "macro";
+constexpr auto QUESTION = "q";
+constexpr auto ANSWER   = "t";
+constexpr auto ON_TOP   = "v";
+constexpr auto ITEMS    = "x";
 
 constexpr QChar STRING_SEPARATOR = '\n';
 
-constexpr auto NEW_ITEM = QT_TRANSLATE_NOOP("flifaqer", "New question");
-
-QString Tr(const char* str)
-{
-	return QCoreApplication::translate(APP_ID, str);
-}
+constexpr auto NEW_ITEM      = QT_TRANSLATE_NOOP("flifaqer", "New question");
+constexpr auto ALREADY_ADDED = QT_TRANSLATE_NOOP("flifaqer", "Language '%1' already added");
 
 QJsonObject ParseJson(QIODevice& stream, QJsonDocument& doc)
 {
@@ -61,8 +55,9 @@ QJsonObject ParseJson(QIODevice& stream, QJsonDocument& doc)
 
 QString ToString(const QJsonValue& value)
 {
-	return value.isString() ? value.toString()
-	     : value.isArray()  ? (value.toArray() | std::views::transform([](const auto& item) {
+	return (value.isNull() || value.isUndefined()) ? QString {}
+	     : value.isString()                        ? value.toString()
+	     : value.isArray()                         ? (value.toArray() | std::views::transform([](const auto& item) {
                                   return item.toString();
                               })
                               | std::ranges::to<QStringList>())
@@ -80,6 +75,8 @@ struct ProfileAnswer
 {
 	QString simple;
 	QString tagged;
+
+	std::unordered_map<QString, QString> tags;
 };
 
 struct Profile
@@ -118,6 +115,10 @@ struct Profile
 
 #undef ITEM
 
+		const auto objTags = objAnswer.value("tags").toObject();
+		for (auto it = objTags.constBegin(), end = objTags.constEnd(); it != end; ++it)
+			profile.answer.tags.try_emplace(it.key(), it.value().toString());
+
 		return profile;
 	}
 };
@@ -143,6 +144,8 @@ private:
 	std::unordered_map<QString, QString> m_data;
 };
 
+using Replacements = std::unordered_map<QString, String>;
+
 QString String::EMPTY;
 
 struct Item;
@@ -156,52 +159,99 @@ struct Item
 	String answer;
 
 	Items children;
-	bool  childrenFirst { false };
+	bool  onTop { false };
 };
 
-struct Additional
+QString GetAnswerProfile(const ProfileAnswer& profile, QString& answer)
 {
-	String title;
-	String head;
-	String tail;
-};
+	if (answer.startsWith('<'))
+		return profile.tagged;
 
-void ExportAnswer(ProfileAnswer profile, const QString& language, const Item& item, QTextStream& stream)
-{
-	const auto& answer = item.answer(language);
-	stream << (answer.simplified().startsWith('<') ? profile.tagged : profile.simple).replace("#ANSWER#", answer);
+	if (answer.startsWith(' '))
+	{
+		answer = answer.mid(1);
+		return profile.tagged;
+	}
+
+	if (answer.startsWith('['))
+	{
+		if (const auto pos = answer.indexOf(']'); pos > 0)
+		{
+			if (const auto it = profile.tags.find(answer.mid(1, pos - 1)); it != profile.tags.end())
+			{
+				answer = answer.mid(pos + 1);
+				return it->second;
+			}
+		}
+	}
+
+	return profile.simple;
 }
 
-void ExportImpl(const Profile& profile, const QString& language, const Item& parent, QTextStream& stream, const size_t level = 0)
+void ExportImage(const QString& answer, QTextStream& stream)
+{
+	static const QRegularExpression rx(R"(^\[img (\S+?) (\S+?) (\S+?)\]$)");
+
+	const auto match = rx.match(answer);
+	if (match.hasMatch())
+		stream << QString(R"(<p class="img"><img src="img/%1/%2.jpg" alt="&#128558; image lost" class="img%3">)").arg(match.captured(1), match.captured(2), match.captured(3)) << STRING_SEPARATOR;
+}
+
+void ExportId(const QString& answer, QTextStream& stream)
+{
+	static const QRegularExpression rx(R"(^\[id (\S+) *?(\S*)\]$)");
+
+	const auto match = rx.match(answer);
+	if (match.hasMatch())
+		stream << QString(R"(<p id="%1"%2>)").arg(match.captured(1), match.captured(2).isEmpty() ? "" : QString(R"( class="%1")").arg(match.captured(2)));
+}
+
+void ExportAnswer(const ProfileAnswer& profile, QString& answer, QTextStream& stream)
+{
+	if (answer.startsWith("[img"))
+		return ExportImage(answer, stream);
+
+	if (answer.startsWith("[id"))
+		return ExportId(answer, stream);
+
+	auto profileAnswer = GetAnswerProfile(profile, answer);
+	stream << profileAnswer.replace("#ANSWER#", answer);
+}
+
+void ExportAnswer(const ProfileAnswer& profile, const QString& language, const Item& item, QTextStream& stream)
+{
+	for (auto&& answer : item.answer(language).split(STRING_SEPARATOR))
+		ExportAnswer(profile, answer, stream);
+}
+
+void ExportImpl(const Profile& profile, const QString& language, const Item& parent, QTextStream& stream, const bool onTop = false, const size_t level = 0)
 {
 	assert(!profile.question.empty());
-	for (const auto& child : parent.children)
+	for (const auto& child : parent.children | std::views::filter([&](const auto& item) {
+								 return item->onTop == onTop;
+							 }))
 	{
 		auto [questionBefore, questionAfter] = profile.question[std::min(level, profile.question.size() - 1)];
 		stream << questionBefore.replace("#QUESTION#", child->question(language));
-		if (child->childrenFirst)
-		{
-			ExportImpl(profile, language, *child, stream, level + 1);
-			ExportAnswer(profile.answer, language, *child, stream);
-		}
-		else
-		{
-			ExportAnswer(profile.answer, language, *child, stream);
-			ExportImpl(profile, language, *child, stream, level + 1);
-		}
+		ExportImpl(profile, language, *child, stream, true, level + 1);
+		ExportAnswer(profile.answer, language, *child, stream);
+		ExportImpl(profile, language, *child, stream, false, level + 1);
 		stream << questionAfter.replace("#QUESTION#", child->question(language));
 	}
 }
 
-void ExportImpl(Profile profile, const QString& language, const Item& root, const Additional& additional, QIODevice& stream)
+void ExportImpl(Profile profile, const QString& language, const Item& root, const Replacements& replacements, QIODevice& stream)
 {
-	profile.head.replace("#LANGUAGE#", language).replace("#TITLE#", additional.title(language)).replace("#HEAD#", additional.head(language));
-	profile.tail.replace("#TAIL#", additional.tail(language));
+	for (const auto& [key, value] : replacements)
+	{
+		profile.head.replace(key, value(language));
+		profile.tail.replace(key, value(language));
+	}
 
 	QTextStream textStream(&stream);
-	textStream << profile.head;
+	textStream << profile.head << STRING_SEPARATOR;
 	ExportImpl(profile, language, root, textStream);
-	textStream << profile.tail;
+	textStream << profile.tail << STRING_SEPARATOR;
 }
 
 using File  = std::pair<QString, QString>;
@@ -215,14 +265,14 @@ void ParseItems(const QString& language, const QJsonArray& jsonArray, const std:
 		auto&      child = row < static_cast<int>(parent->children.size()) ? parent->children[row] : parent->children.emplace_back(std::make_shared<Item>(parent.get(), row));
 		child->question.Set(language, obj.value(QUESTION).toString());
 		child->answer.Set(language, ToString(obj.value(ANSWER)));
-		child->childrenFirst = obj.value(CHILDREN_FIRST).toBool();
+		child->onTop = obj.value(ON_TOP).toBool();
 		ParseItems(language, obj.value(ITEMS).toArray(), child);
 	}
 }
 
-File ParseFile(QString file, const std::shared_ptr<Item>& root, Additional& additional)
+File ParseFile(QString file, const std::shared_ptr<Item>& root, Replacements& replacements)
 {
-	PLOGD << "parse " << file << "started";
+	PLOGD << "parse " << file << " started";
 
 	QFile stream(file);
 	if (!stream.open(QIODevice::ReadOnly))
@@ -235,27 +285,13 @@ File ParseFile(QString file, const std::shared_ptr<Item>& root, Additional& addi
 	if (language.isEmpty())
 		throw std::invalid_argument("document language must be specified");
 
-	additional.title.Set(language, obj.value(TITLE).toString());
-	additional.head.Set(language, obj.value(HEAD).toString());
-	additional.tail.Set(language, obj.value(TAIL).toString());
+	const auto macro = obj.value(MACRO).toObject();
+	for (auto it = macro.constBegin(), end = macro.constEnd(); it != end; ++it)
+		replacements[it.key()].Set(language, it.value().toString());
 
 	ParseItems(language, obj.value(ITEMS).toArray(), root);
 
 	return std::make_pair(std::move(language), std::move(file));
-}
-
-auto CreateModelData(const ISettings& settings)
-{
-	auto        result     = std::make_tuple(Files {}, std::make_shared<Item>(), Additional {});
-	auto&       files      = std::get<0>(result);
-	const auto& root       = std::get<1>(result);
-	auto&       additional = std::get<2>(result);
-
-	std::ranges::transform(settings.Get(Constant::INPUT_FILES).toStringList(), std::back_inserter(files), [&](auto&& item) {
-		return ParseFile(std::forward<QString>(item), root, additional);
-	});
-
-	return result;
 }
 
 QJsonArray SaveImpl(const QString& language, const Item& item)
@@ -277,8 +313,8 @@ QJsonArray SaveImpl(const QString& language, const Item& item)
 		};
 		if (!answer.isEmpty())
 			obj.insert(ANSWER, std::move(answer));
-		if (child->childrenFirst)
-			obj.insert(CHILDREN_FIRST, child->childrenFirst);
+		if (child->onTop)
+			obj.insert(ON_TOP, true);
 
 		if (!child->children.empty())
 			obj.insert(ITEMS, SaveImpl(language, *child));
@@ -291,17 +327,9 @@ QJsonArray SaveImpl(const QString& language, const Item& item)
 class ModelImpl final : public QAbstractItemModel
 {
 public:
-	static std::unique_ptr<QAbstractItemModel> Create(const ISettings& settings)
+	static std::unique_ptr<QAbstractItemModel> Create()
 	{
-		auto [files, root, additional] = CreateModelData(settings);
-		return std::make_unique<ModelImpl>(std::move(files), std::move(root), std::move(additional));
-	}
-
-	ModelImpl(Files files, std::shared_ptr<Item> root, Additional additional)
-		: m_files { std::move(files) }
-		, m_root { std::move(root) }
-		, m_additional { std::move(additional) }
-	{
+		return std::make_unique<ModelImpl>();
 	}
 
 private: // QAbstractItemModel
@@ -408,14 +436,12 @@ private:
 			case Role::LanguageList:
 				return m_files | std::views::keys | std::ranges::to<QStringList>();
 
-			case Role::Title:
-				return m_additional.title(m_language);
-
-			case Role::Head:
-				return m_additional.head(m_language);
-
-			case Role::Tail:
-				return m_additional.tail(m_language);
+			case Role::Macro:
+				return (m_replacements | std::views::transform([this](const auto& item) {
+							return QString("%1=%2").arg(item.first, item.second(m_language));
+						})
+				        | std::ranges::to<QStringList>())
+				    .join(STRING_SEPARATOR);
 
 			default:
 				break;
@@ -435,13 +461,13 @@ private:
 				return item->question(m_language);
 
 			case Qt::CheckStateRole:
-				return item->childrenFirst ? Qt::Checked : Qt::Unchecked;
+				return item->onTop ? Qt::Checked : Qt::Unchecked;
 
 			case Qt::ForegroundRole:
 				return std::ranges::any_of(
 						   m_files | std::views::keys,
 						   [&](const QString& language) {
-							   return item->answer(language).isEmpty() || item->question(language) == Tr(NEW_ITEM);
+							   return item->answer(language).isEmpty() || item->question(language).isEmpty() || item->question(language) == Tr(NEW_ITEM);
 						   }
 					   )
 				         ? QBrush(Qt::red)
@@ -469,6 +495,15 @@ private:
 	{
 		switch (role)
 		{
+			case Role::AddFile:
+			{
+				auto file = ParseFile(value.toString(), m_root, m_replacements);
+				if (const auto it = std::ranges::find(m_files, file.first, &File::first); it != m_files.end())
+					throw std::invalid_argument(Tr(ALREADY_ADDED).arg(it->first).toStdString());
+
+				m_files.emplace_back(std::move(file));
+			}
+
 			case Role::Language:
 				return Util::Set(
 					m_language,
@@ -481,20 +516,24 @@ private:
 					}
 				);
 
+			case Role::Macro:
+				for (const auto& str : value.toString().split(STRING_SEPARATOR))
+					if (const auto pos = str.indexOf('='); pos > 0)
+						m_replacements[str.first(pos)].Set(m_language, str.mid(pos + 1));
+
+				erase_if(m_replacements, [&](const auto& item) {
+					return std::ranges::all_of(m_files | std::views::keys, [&](const QString& language) {
+						return item.second(language).isEmpty();
+					});
+				});
+
+				return true;
+
 			case Role::ReferenceLanguage:
 				return Util::Set(m_referenceLanguage, value.toString());
 
 			case Role::TranslationLanguage:
 				return Util::Set(m_translationLanguage, value.toString());
-
-			case Role::Title:
-				return m_additional.title.Set(m_language, value.toString());
-
-			case Role::Head:
-				return m_additional.head.Set(m_language, value.toString());
-
-			case Role::Tail:
-				return m_additional.tail.Set(m_language, value.toString());
 
 			case Role::Save:
 				return Save();
@@ -517,7 +556,7 @@ private:
 		switch (role)
 		{
 			case Qt::CheckStateRole:
-				return Util::Set(item->childrenFirst, value.value<Qt::CheckState>() == Qt::Checked);
+				return Util::Set(item->onTop, value.value<Qt::CheckState>() == Qt::Checked);
 
 			case Role::ReferenceQuestion:
 				if (item->question.Set(m_referenceLanguage, value.toString()))
@@ -570,19 +609,21 @@ private:
 
 	void Save(const QString& language, const QString& file) const
 	{
+		QJsonObject macro;
+		for (const auto& [key, value] : m_replacements)
+			macro.insert(key, value(language));
+
 		QJsonObject obj {
 			{ LANGUAGE, language },
-            { TITLE, m_additional.title(language) },
-            { HEAD, m_additional.head(language) },
-            { TAIL, m_additional.tail(language) },
-            { ITEMS, SaveImpl(language, *m_root) },
+			{ MACRO, std::move(macro) },
+			{ ITEMS, SaveImpl(language, *m_root) },
 		};
 
 		QFile stream(file);
 		if (!stream.open(QIODevice::WriteOnly))
 			throw std::runtime_error(std::format("cannot write to {}", file));
 
-		stream.write(QJsonDocument(obj).toJson());
+		stream.write(QJsonDocument(std::move(obj)).toJson());
 	}
 
 	[[nodiscard]] bool Export(const QString& profilePath) const
@@ -619,22 +660,22 @@ private:
 		if (!stream.open(QIODevice::WriteOnly))
 			throw std::runtime_error(std::format("cannot write to {}", file));
 
-		ExportImpl(profile, language, *m_root, m_additional, stream);
+		ExportImpl(profile, language, *m_root, m_replacements, stream);
 	}
 
 private:
-	const Files                 m_files;
-	const std::shared_ptr<Item> m_root;
-	Additional                  m_additional;
+	Files                       m_files;
+	const std::shared_ptr<Item> m_root { std::make_shared<Item>() };
+	Replacements                m_replacements;
 
 	QString m_language, m_referenceLanguage, m_translationLanguage;
 };
 
 } // namespace
 
-Model::Model(const std::shared_ptr<const ISettings>& settings, QObject* parent)
+Model::Model(QObject* parent)
 	: QIdentityProxyModel(parent)
-	, m_source { ModelImpl::Create(*settings) }
+	, m_source { ModelImpl::Create() }
 {
 	QIdentityProxyModel::setSourceModel(m_source.get());
 }

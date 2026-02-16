@@ -1,7 +1,9 @@
 #include <ranges>
 
+#include <QAbstractItemModel>
 #include <QApplication>
 #include <QDir>
+#include <QMessageBox>
 #include <QStandardPaths>
 #include <QStyleFactory>
 
@@ -11,10 +13,12 @@
 #include "logging/init.h"
 #include "util/ISettings.h"
 
+#include "AppConstant.h"
 #include "Constant.h"
 #include "MainWindow.h"
 #include "di_app.h"
 #include "log.h"
+#include "role.h"
 
 #include "config/git_hash.h"
 #include "config/version.h"
@@ -40,7 +44,7 @@ int main(int argc, char* argv[])
 		QCoreApplication::setApplicationVersion(PRODUCT_VERSION);
 		QApplication::setStyle(QStyleFactory::create("Fusion"));
 
-		Log::LoggingInitializer logging(QString("%1/%2.%3.log").arg(QStandardPaths::writableLocation(QStandardPaths::TempLocation), COMPANY_ID, PRODUCT_ID).toStdWString());
+		Log::LoggingInitializer logging(QString("%1/%2.%3.log").arg(QStandardPaths::writableLocation(QStandardPaths::TempLocation), COMPANY_ID, APP_ID).toStdWString());
 
 		PLOGI << "App started";
 		PLOGI << "Commit hash: " << GIT_HASH;
@@ -56,8 +60,19 @@ int main(int argc, char* argv[])
 		const auto settings = container->resolve<ISettings>();
 		if (argc > 1)
 			settings->Set(Constant::INPUT_FILES, std::views::iota(1, argc) | std::views::transform([&](const int n) {
-													 return QDir::fromNativeSeparators(argv[n]);
-												 }) | std::ranges::to<QStringList>());
+										   return QDir::fromNativeSeparators(argv[n]);
+									   }) | std::ranges::to<QStringList>());
+
+		try
+		{
+			const auto model = container->resolve<QAbstractItemModel>();
+			for (const auto& file : settings->Get(Constant::INPUT_FILES).toStringList())
+				model->setData({}, file, Role::AddFile);
+		}
+		catch (const std::exception& ex)
+		{
+			QMessageBox::critical(nullptr, Tr(Constant::ERROR), ex.what());
+		}
 
 		const auto mainWindow = container->resolve<QMainWindow>();
 		mainWindow->show();

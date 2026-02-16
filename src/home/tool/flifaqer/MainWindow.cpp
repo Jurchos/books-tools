@@ -2,10 +2,14 @@
 
 #include "MainWindow.h"
 
+#include <QClipboard>
 #include <QFileDialog>
+#include <QMessageBox>
+#include <QPlainTextEdit>
 
 #include "util/GeometryRestorable.h"
 
+#include "AppConstant.h"
 #include "di_app.h"
 #include "role.h"
 
@@ -23,15 +27,11 @@ constexpr auto PROFILE  = "profile";
 
 constexpr auto FONT_SIZE_KEY = "ui/Font/pointSizeF";
 
-constexpr auto ADD                   = QT_TRANSLATE_NOOP("flifaqer", "Add");
-constexpr auto REMOVE                = QT_TRANSLATE_NOOP("flifaqer", "Remove");
-constexpr auto SELECT_PROFILE        = QT_TRANSLATE_NOOP("flifaqer", "Select profile");
-constexpr auto SELECT_PROFILE_FILTER = QT_TRANSLATE_NOOP("flifaqer", "Json files (*.json);;All files (*.*)");
-
-QString Tr(const char* str)
-{
-	return QCoreApplication::translate(APP_ID, str);
-}
+constexpr auto ADD                = QT_TRANSLATE_NOOP("flifaqer", "Add");
+constexpr auto REMOVE             = QT_TRANSLATE_NOOP("flifaqer", "Remove");
+constexpr auto SELECT_PROFILE     = QT_TRANSLATE_NOOP("flifaqer", "Select profile");
+constexpr auto SELECT_FILES       = QT_TRANSLATE_NOOP("flifaqer", "Select files");
+constexpr auto SELECT_JSON_FILTER = QT_TRANSLATE_NOOP("flifaqer", "Json files (*.json);;All files (*.*)");
 
 }
 
@@ -57,11 +57,7 @@ public:
 		m_ui.translationLayout->addWidget(m_translation.get());
 
 		for (const auto& language : m_model->data({}, Role::LanguageList).toStringList())
-		{
-			m_ui.language->addItem(language, language);
-			m_reference->AddLanguage(language);
-			m_translation->AddLanguage(language);
-		}
+			AddLanguage(language);
 
 		m_reference->SetMode(TranslationWidget::Mode::Reference);
 		m_translation->SetMode(TranslationWidget::Mode::Translation);
@@ -69,20 +65,9 @@ public:
 		if (const auto index = m_ui.language->findData(m_settings->Get(LANGUAGE, QString())); index >= 0)
 			m_ui.language->setCurrentIndex(index);
 
-		std::vector<std::pair<QLineEdit*, int>> lineEditRoles {
-			{ m_ui.title, Role::Title },
-			{  m_ui.head,  Role::Head },
-			{  m_ui.tail,  Role::Tail },
-		};
-		for (auto& [lineEdit, role] : lineEditRoles)
-			connect(lineEdit, &QLineEdit::editingFinished, [this, lineEdit, role] {
-				m_model->setData({}, lineEdit->text(), role);
-			});
-
-		const auto setLanguage = [this, lineEditRoles = std::move(lineEditRoles)] {
-			m_model->setData({}, m_ui.language->currentData().toString(), Role::Language);
-			for (auto& [lineEdit, role] : lineEditRoles)
-				lineEdit->setText(m_model->data({}, role).toString());
+		auto setLanguage = [this] {
+			m_model->setData({}, m_ui.language->currentData(), Role::Language);
+			m_ui.replacements->setPlainText(m_model->data({}, Role::Macro).toString());
 		};
 
 		connect(m_ui.language, &QComboBox::currentIndexChanged, [this, setLanguage] {
@@ -92,6 +77,10 @@ public:
 
 		if (m_ui.language->count() > 0)
 			setLanguage();
+
+		connect(m_ui.replacements, &QPlainTextEdit::textChanged, [this] {
+			m_model->setData({}, m_ui.replacements->toPlainText(), Role::Macro);
+		});
 
 		connect(m_ui.navigatorView, &QWidget::customContextMenuRequested, [this](const QPoint& pos) {
 			OnNavigationViewContextMenuRequested(pos);
@@ -108,6 +97,9 @@ public:
 			m_translation->SetCurrentIndex(m_ui.navigatorView->currentIndex());
 		});
 
+		connect(m_ui.actionAddFiles, &QAction::triggered, [this] {
+			OnActionAddFilesTriggered();
+		});
 		connect(m_ui.actionSave, &QAction::triggered, [this] {
 			m_model->setData({}, {}, Role::Save);
 		});
@@ -150,7 +142,11 @@ private:
 			m_model->insertRow(m_model->rowCount(index), index);
 			if (index.isValid())
 				m_ui.navigatorView->expand(index);
-			m_ui.navigatorView->setCurrentIndex(m_model->index(m_model->rowCount(index) - 1, 0, index));
+
+			const auto currentIndex = m_model->index(m_model->rowCount(index) - 1, 0, index);
+			if (const auto clipboardText = QGuiApplication::clipboard()->text(); !clipboardText.isEmpty())
+				m_model->setData(currentIndex, clipboardText, Role::ReferenceQuestion);
+			m_ui.navigatorView->setCurrentIndex(currentIndex);
 		});
 		menu.addAction(
 				Tr(REMOVE),
@@ -159,6 +155,45 @@ private:
 				}
 		)->setEnabled(index.isValid());
 		menu.exec(QCursor::pos());
+	}
+
+	void OnActionAddFilesTriggered()
+	{
+		auto       files     = m_settings->Get(Constant::INPUT_FILES).toStringList();
+		const auto languages = m_model->data({}, Role::LanguageList).toStringList();
+		try
+		{
+			for (auto&& file : QFileDialog::getOpenFileNames(&m_self, Tr(SELECT_FILES), {}, Tr(SELECT_JSON_FILTER)))
+			{
+				m_model->setData({}, file, Role::AddFile);
+				files << std::move(file);
+			}
+		}
+		catch (const std::exception& ex)
+		{
+			QMessageBox::critical(&m_self, Tr(Constant::ERROR), ex.what());
+		}
+
+		if (files.count() > languages.count())
+			m_settings->Set(Constant::INPUT_FILES, files);
+
+		const auto currentLanguage = m_ui.language->currentData();
+		QString    translationLanguage;
+		for (auto&& language : m_model->data({}, Role::LanguageList).toStringList())
+		{
+			AddLanguage(language);
+			if (!languages.contains(language))
+				translationLanguage = std::move(language);
+		}
+
+		if (const auto index = m_ui.language->findData(currentLanguage); index >= 0)
+		{
+			m_ui.language->setCurrentIndex(index);
+			m_model->setData({}, m_ui.language->currentData(), Role::Language);
+		}
+
+		if (!translationLanguage.isEmpty())
+			m_translation->SetLanguage(translationLanguage);
 	}
 
 	void OnActionExportTriggered()
@@ -176,12 +211,22 @@ private:
 
 	QString OnActionSetProfileTriggered()
 	{
-		auto profile = QFileDialog::getOpenFileName(&m_self, Tr(SELECT_PROFILE), {}, Tr(SELECT_PROFILE_FILTER));
+		auto profile = QFileDialog::getOpenFileName(&m_self, Tr(SELECT_PROFILE), {}, Tr(SELECT_JSON_FILTER));
 		if (profile.isEmpty())
 			return {};
 
 		m_settings->Set(PROFILE, profile);
 		return profile;
+	}
+
+	void AddLanguage(const QString& language)
+	{
+		if (m_ui.language->findData(language) >= 0)
+			return;
+
+		m_ui.language->addItem(language, language);
+		m_reference->AddLanguage(language);
+		m_translation->AddLanguage(language);
 	}
 
 private:

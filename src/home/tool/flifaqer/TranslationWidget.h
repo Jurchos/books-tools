@@ -34,6 +34,7 @@ public:
 public:
 	void SetMode(Mode mode);
 	void AddLanguage(const QString& language) const;
+	void SetLanguage(const QString& language) const;
 	void SetCurrentIndex(const QModelIndex& index);
 
 private:
