@@ -376,6 +376,17 @@ void CreateInpx(const Settings& settings, const Archives& archives, InpDataProvi
 			book->sourceLib = sourceLib;
 			book->folder    = zipFileInfo.fileName();
 
+			const auto dashIt = [](QString& title) {
+				std::ranges::transform(title, title.begin(), [](const QChar ch) {
+					return ch >= QChar { 0x2010 } && ch <= QChar { 0x2015 } ? QChar { '-' } : ch == QChar { 0x0451 } ? QChar { 0x0435 } : ch;
+				});
+				title.replace(" - ", DASH);
+				title.replace(" -- ", DASH);
+			};
+
+			book->author.replace(" - ", DASH);
+			book->author.replace(" -- ", DASH);
+
 			auto& series = book->series;
 			for (auto& s : series)
 			{
@@ -384,6 +395,7 @@ void CreateInpx(const Settings& settings, const Archives& archives, InpDataProvi
 				});
 				s.title.replace(" - ", DASH);
 			}
+
 			std::ranges::sort(series, std::greater {}, seriesUniquePredicate);
 			if (const auto [begin, end] = std::ranges::unique(series, {}, seriesUniquePredicate); begin != end)
 				series.erase(begin, end);
@@ -586,7 +598,7 @@ std::vector<std::tuple<QString, QByteArray>> CreateReviewData(const std::filesys
 				{
 					if (const auto rIt = replacement.find({ book->folder, book->GetFileName() }); rIt != replacement.end())
 					{
-						if (!((book = inpDataProvider.GetBook({rIt->second.first, rIt->second.second}))))
+						if (!((book = inpDataProvider.GetBook({ rIt->second.first, rIt->second.second }))))
 						{
 							auto replacementLibId = rIt->second.second;
 							if (const auto pos = replacementLibId.lastIndexOf('.'); pos > 0)
