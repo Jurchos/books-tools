@@ -126,35 +126,37 @@ public:
 private: // UniqueFileStorage::ImageComparer
 	[[nodiscard]] ImagesCompareResult Compare(const UniqueFile& lhs, const UniqueFile& rhs) const override
 	{
-		auto result = ImagesCompareResult::Equal;
-		if (lhs.cover.hash != rhs.cover.hash)
-		{
-			if (lhs.cover.hash.isEmpty())
-				result = ImagesCompareResult::Inner;
-			else if (rhs.cover.hash.isEmpty())
-				result = ImagesCompareResult::Outer;
-			else if (lhs.cover.pHash == 0 || rhs.cover.pHash == 0 || std::popcount(lhs.cover.pHash ^ rhs.cover.pHash) > m_threshold)
-				return ImagesCompareResult::Varied;
-		}
+		const auto getAllImages = [](const UniqueFile& uniqueFile) {
+			std::vector<std::reference_wrapper<const ImageItem>> images;
+			images.reserve(uniqueFile.images.size() + !uniqueFile.cover.hash.isEmpty());
+			if (!uniqueFile.cover.hash.isEmpty())
+				images.emplace_back(uniqueFile.cover);
+			std::ranges::copy(uniqueFile.images, std::back_inserter(images));
+			return images;
+		};
+
+		const auto lhsImages = getAllImages(lhs), rhsImages = getAllImages(rhs);
 
 		using ImageHashes = std::unordered_multimap<uint64_t, QString>;
 		using ImageHash   = std::pair<uint64_t, QString>;
 
 		ImageHashes lpHashes, rpHashes;
 
-		auto lIt = lhs.images.cbegin(), rIt = rhs.images.cbegin();
-		while (lIt != lhs.images.cend() && rIt != rhs.images.cend())
+		auto lIt = lhsImages.cbegin(), rIt = rhsImages.cbegin();
+		while (lIt != lhsImages.cend() && rIt != rhsImages.cend())
 		{
-			if (lIt->hash < rIt->hash)
+			const auto& lRef = lIt->get();
+			const auto& rRef = rIt->get();
+			if (lRef.hash < rRef.hash)
 			{
-				lpHashes.emplace(lIt->pHash, lIt->fileName);
+				lpHashes.emplace(lRef.pHash, lRef.fileName);
 				++lIt;
 				continue;
 			}
 
-			if (lIt->hash > rIt->hash)
+			if (lRef.hash > rRef.hash)
 			{
-				rpHashes.emplace(rIt->pHash, rIt->fileName);
+				rpHashes.emplace(rRef.pHash, rRef.fileName);
 				++rIt;
 				continue;
 			}
@@ -164,10 +166,10 @@ private: // UniqueFileStorage::ImageComparer
 		}
 
 		const auto transform = [](const auto& item) {
-			return std::make_pair(item.pHash, item.fileName);
+			return std::make_pair(item.get().pHash, item.get().fileName);
 		};
-		std::transform(lIt, lhs.images.cend(), std::inserter(lpHashes, lpHashes.end()), transform);
-		std::transform(rIt, rhs.images.cend(), std::inserter(rpHashes, rpHashes.end()), transform);
+		std::transform(lIt, lhsImages.cend(), std::inserter(lpHashes, lpHashes.end()), transform);
+		std::transform(rIt, rhsImages.cend(), std::inserter(rpHashes, rpHashes.end()), transform);
 
 		auto lIds = lpHashes | std::views::values | std::ranges::to<std::unordered_set<QString>>();
 		auto rIds = rpHashes | std::views::values | std::ranges::to<std::unordered_set<QString>>();
@@ -190,19 +192,13 @@ private: // UniqueFileStorage::ImageComparer
 			}
 		}
 
-		if (!lIds.empty())
-			result = result == ImagesCompareResult::Inner ? ImagesCompareResult::Varied : ImagesCompareResult::Outer;
-
-		if (result == ImagesCompareResult::Varied)
-			return result;
-
+		auto result = lIds.empty() ? ImagesCompareResult::Equal : ImagesCompareResult::Outer;
 		if (!rIds.empty())
 			result = result == ImagesCompareResult::Outer ? ImagesCompareResult::Varied : ImagesCompareResult::Inner;
-
 		if (result == ImagesCompareResult::Varied)
 			return result;
 
-		if (!((lhs.images.empty() || rhs.images.empty()) && (lhs.cover.hash.isEmpty() || rhs.cover.hash.isEmpty())))
+		if (!(lhsImages.empty() || rhsImages.empty()))
 			return result;
 
 		if (Util::Intersect(lhs.title, rhs.title))
