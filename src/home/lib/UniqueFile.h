@@ -56,6 +56,7 @@ public:
 
 public:
 	Book* GetBook(const UniqueFile::Uid& uid) const;
+	Book* GetBook(const QString& sourceLib, const QString& libId) const;
 	void  SetSourceLib(const QString& sourceLib);
 	Book* SetFile(const UniqueFile::Uid& uid, QString id);
 	bool  Enumerate(std::function<bool(const QString&, const IDump&)> functor) const;
@@ -71,6 +72,8 @@ private:
 	std::vector<CacheItem> m_cache;
 	InpData                m_data;
 	std::vector<Book*>     m_books;
+
+	std::unordered_map<QString, Book*> m_libIdToBook;
 };
 
 class LIB_EXPORT UniqueFileStorage final : Util::HashParser::IObserver

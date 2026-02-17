@@ -265,6 +265,12 @@ Book* InpDataProvider::GetBook(const UniqueFile::Uid& uid) const
 	return it != m_data.end() ? it->second.get() : nullptr;
 }
 
+Book* InpDataProvider::GetBook(const QString& sourceLib, const QString& libId) const
+{
+	const auto it = m_libIdToBook.find(QString("%1_%2").arg(sourceLib.toLower(), libId));
+	return it != m_libIdToBook.end() ? it->second : nullptr;
+}
+
 void InpDataProvider::SetSourceLib(const QString& sourceLib)
 {
 	if (const auto it = std::ranges::find_if(
@@ -278,6 +284,9 @@ void InpDataProvider::SetSourceLib(const QString& sourceLib)
 		if (it->inpData.empty())
 			it->inpData = CreateInpData(*it->dump);
 		m_currentInpData = &it->inpData;
+		std::ranges::transform(*m_currentInpData | std::views::values, std::inserter(m_libIdToBook, m_libIdToBook.end()), [sourceLib = sourceLib.toLower()](const auto& item) {
+			return std::make_pair(QString("%1_%2").arg(sourceLib, item->libId), item.get());
+		});
 		return;
 	}
 
@@ -314,8 +323,9 @@ Book* InpDataProvider::SetFile(const UniqueFile::Uid& uid, QString id)
 	if (const auto it = m_currentInpData->find(uid.file); it != m_currentInpData->end())
 	{
 		assert(it->second);
-		auto& book = m_data.try_emplace(QString("%1#%2").arg(uid.folder, uid.file), it->second).first->second;
-		book->id   = std::move(id);
+		auto& book   = m_data.try_emplace(QString("%1#%2").arg(uid.folder, uid.file), it->second).first->second;
+		book->id     = std::move(id);
+		book->folder = uid.folder;
 		return book.get();
 	}
 

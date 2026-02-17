@@ -470,7 +470,7 @@ std::vector<std::tuple<QString, QByteArray>> CreateReviewData(const std::filesys
 	std::mutex                                   archivesGuard;
 	std::vector<std::tuple<QString, QByteArray>> archives;
 
-	threadPool->enqueue([&]() {
+	threadPool->enqueue([&] {
 		auto             archiveName = QString::fromStdWString(reviewsFolder / Inpx::REVIEWS_ADDITIONAL_ARCHIVE_NAME);
 		const ScopedCall logGuard(
 			[&] {
@@ -567,12 +567,6 @@ std::vector<std::tuple<QString, QByteArray>> CreateReviewData(const std::filesys
 		});
 	};
 
-	PLOGI << "Creating LibID to book index";
-	const auto libIdToBook = inpDataProvider.Books() | std::views::transform([](const Book* book) {
-								 return std::make_pair(std::make_pair(book->libId, book->sourceLib.toLower()), book);
-							 })
-	                       | std::ranges::to<std::unordered_map<std::pair<QString, QString>, const Book*, Util::PairHash<QString, QString>>>();
-
 	PLOGI << "Get review months";
 	std::set<std::pair<int, int>> months;
 	inpDataProvider.Enumerate([&](const QString&, const IDump& dump) {
@@ -583,28 +577,39 @@ std::vector<std::tuple<QString, QByteArray>> CreateReviewData(const std::filesys
 	Util::Progress progress(months.size(), "select reviews");
 	for (const auto& [year, month] : months)
 	{
+		Data data;
+
 		inpDataProvider.Enumerate([&](const QString& sourceLib, const IDump& dump) {
-			Data data;
-
 			dump.Review(year, month, [&](const QString& libId, QString name, QString time, QString text) {
-				const auto it = libIdToBook.find(std::make_pair(libId, sourceLib));
-				if (it == libIdToBook.end())
-					return;
-
-				auto* book = it->second;
-				if (const auto rIt = replacement.find({ book->folder, book->file }); rIt != replacement.end())
-					book = inpDataProvider.GetBook({ rIt->second.first, rIt->second.second });
+				auto* book = inpDataProvider.GetBook(sourceLib, libId);
+				while (book)
+				{
+					if (const auto rIt = replacement.find({ book->folder, book->GetFileName() }); rIt != replacement.end())
+					{
+						if (!((book = inpDataProvider.GetBook({rIt->second.first, rIt->second.second}))))
+						{
+							auto replacementLibId = rIt->second.second;
+							if (const auto pos = replacementLibId.lastIndexOf('.'); pos > 0)
+								replacementLibId = replacementLibId.first(pos);
+							book = inpDataProvider.GetBook(sourceLib, replacementLibId);
+						}
+					}
+					else
+						break;
+				}
 				if (!book)
 					return;
 
-				data.emplace_back(book->folder, book->GetFileName(), std::move(name), std::move(time), std::move(text));
+				if (inpDataProvider.GetBook({ book->folder, book->GetFileName() }))
+					data.emplace_back(book->folder, book->GetFileName(), std::move(name), std::move(time), std::move(text));
 			});
-
-			if (!data.empty())
-				write(year, month, std::move(data));
 
 			return false;
 		});
+
+		if (!data.empty())
+			write(year, month, std::move(data));
+
 		progress.Increment(1, std::format("{:04}-{:02}", year, month));
 	}
 
