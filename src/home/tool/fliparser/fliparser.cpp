@@ -349,6 +349,8 @@ void CreateInpx(const Settings& settings, const Archives& archives, InpDataProvi
 	auto      zipFileController = Zip::CreateZipFileController();
 	QDateTime maxTime;
 
+	size_t totalCounter = 0;
+
 	for (const auto& [zipFileInfo, sourceLib] : archives | std::views::reverse | std::views::transform([](const auto& item) {
 													return std::make_pair(QFileInfo(item.filePath), item.sourceLib);
 												}))
@@ -394,7 +396,7 @@ void CreateInpx(const Settings& settings, const Archives& archives, InpDataProvi
 
 			dashIt(book->author);
 
-			auto& series = book->series;
+			auto& series = book->series; //-V826
 			std::ranges::for_each(series, dashIt, &Series::title);
 
 			std::ranges::sort(series, std::greater {}, seriesUniquePredicate);
@@ -427,7 +429,11 @@ void CreateInpx(const Settings& settings, const Archives& archives, InpDataProvi
 
 		if (!file.isEmpty())
 			zipFileController->AddFile(zipFileInfo.completeBaseName() + ".inp", std::move(file), QDateTime::currentDateTime());
+
+		totalCounter += counter;
 	}
+
+	PLOGV << "books added total: " << totalCounter;
 
 	const auto collectionInfo = [&]() -> QString {
 		if (!QFile::exists(settings.collectionInfoTemplateFile))
