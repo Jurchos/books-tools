@@ -19,6 +19,8 @@
 
 #include "config/version.h"
 
+#include "log.h"
+
 using namespace HomeCompa::FliFaq;
 
 namespace
@@ -238,7 +240,24 @@ private:
 				return;
 		}
 
-		m_model->setData({}, profile, Role::Export);
+		QString errorText;
+		try
+		{
+			m_model->setData({}, profile, Role::Export);
+		}
+		catch (const std::exception& ex)
+		{
+			errorText = ex.what();
+		}
+		catch (...)
+		{
+			errorText = "Unknown save error";
+		}
+		if (errorText.isEmpty())
+			return;
+
+		QMessageBox::critical(&m_self, Tr(Constant::ERROR), errorText);
+		PLOGE << errorText;
 	}
 
 	QString OnActionSetProfileTriggered()

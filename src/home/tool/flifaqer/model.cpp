@@ -636,27 +636,15 @@ private:
 
 	[[nodiscard]] bool Export(const QString& profilePath) const
 	{
-		try
-		{
-			QFile stream(profilePath);
-			if (!stream.open(QIODevice::ReadOnly))
-				throw std::invalid_argument(std::format("cannot open {}", profilePath));
+		QFile stream(profilePath);
+		if (!stream.open(QIODevice::ReadOnly))
+			throw std::invalid_argument(std::format("cannot open {}", profilePath));
 
-			const auto profile = Profile::Deserialize(stream);
-			for (const auto& [language, file] : m_files)
-				Export(profile, language, file);
+		const auto profile = Profile::Deserialize(stream);
+		for (const auto& [language, file] : m_files)
+			Export(profile, language, file);
 
-			return true;
-		}
-		catch (const std::exception& ex)
-		{
-			PLOGE << ex.what();
-		}
-		catch (...)
-		{
-			PLOGE << "Unknown save error";
-		}
-		return false;
+		return true;
 	}
 
 	void Export(const Profile& profile, const QString& language, QString file) const
