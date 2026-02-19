@@ -83,6 +83,7 @@ struct ProfileAnswer
 
 struct Profile
 {
+	QString outputFileName;
 	QString outputFileExtension;
 	QString head;
 	QString tail;
@@ -99,6 +100,7 @@ struct Profile
 
 #define ITEM(DST, SRC, NAME) DST.NAME = ToString(SRC.value(#NAME))
 
+		ITEM(profile, obj, outputFileName);
 		ITEM(profile, obj, outputFileExtension);
 		ITEM(profile, obj, head);
 		ITEM(profile, obj, tail);
@@ -597,22 +599,11 @@ private:
 
 	[[nodiscard]] bool Save() const
 	{
-		try
-		{
-			for (const auto& [language, file] : m_files)
-				Save(language, file);
+		for (const auto& [language, file] : m_files)
+			Save(language, file);
 
-			return true;
-		}
-		catch (const std::exception& ex)
-		{
-			PLOGE << ex.what();
-		}
-		catch (...)
-		{
-			PLOGE << "Unknown save error";
-		}
-		return false;
+		PLOGI << "Saved successfully";
+		return true;
 	}
 
 	void Save(const QString& language, const QString& file) const
@@ -644,13 +635,18 @@ private:
 		for (const auto& [language, file] : m_files)
 			Export(profile, language, file);
 
+		PLOGI << "Export completed successfully";
 		return true;
 	}
 
 	void Export(const Profile& profile, const QString& language, QString file) const
 	{
 		const QFileInfo fileInfo(file);
-		file = fileInfo.dir().filePath(QString("%1.%2").arg(fileInfo.completeBaseName(), profile.outputFileExtension));
+		const auto      fileName = !profile.outputFileName.isEmpty()      ? profile.outputFileName
+		                         : !profile.outputFileExtension.isEmpty() ? QString("%1.%2").arg(fileInfo.completeBaseName(), profile.outputFileExtension)
+		                                                                  : QString("%1.html").arg(fileInfo.completeBaseName());
+
+		file = fileInfo.dir().filePath(fileName);
 
 		QFile stream(file);
 		if (!stream.open(QIODevice::WriteOnly))

@@ -10,16 +10,17 @@
 #include <QPlainTextEdit>
 #include <QStyleFactory>
 
+#include "logging/LogAppender.h"
+#include "util/FunctorExecutionForwarder.h"
 #include "util/GeometryRestorable.h"
 
 #include "AppConstant.h"
 #include "Constant.h"
 #include "di_app.h"
+#include "log.h"
 #include "role.h"
 
 #include "config/version.h"
-
-#include "log.h"
 
 using namespace HomeCompa::FliFaq;
 
@@ -46,6 +47,7 @@ constexpr auto OK                 = QT_TRANSLATE_NOOP("flifaqer", "Everything's 
 class MainWindow::Impl final
 	: Util::GeometryRestorable
 	, Util::GeometryRestorableObserver
+	, virtual plog::IAppender
 {
 	NON_COPY_MOVABLE(Impl)
 
@@ -106,13 +108,13 @@ public:
 		});
 
 		connect(m_ui.actionAddFiles, &QAction::triggered, [this] {
-			OnActionAddFilesTriggered();
+			OnActionTriggered(&Impl::OnActionAddFilesTriggered);
 		});
 		connect(m_ui.actionSave, &QAction::triggered, [this] {
-			m_model->setData({}, {}, Role::Save);
+			OnActionTriggered(&Impl::OnActionSaveTriggered);
 		});
 		connect(m_ui.actionExport, &QAction::triggered, [this] {
-			OnActionExportTriggered();
+			OnActionTriggered(&Impl::OnActionExportTriggered);
 		});
 		connect(m_ui.actionValidate, &QAction::triggered, [this] {
 			OnActionValidateTriggered();
@@ -162,6 +164,14 @@ public:
 		SaveGeometry();
 	}
 
+private: // plog::IAppender
+	void write(const plog::Record& record) override
+	{
+		m_forwarder.Forward([&, message = QString(record.getMessage())] {
+			m_ui.statusBar->showMessage(message, 3000);
+		});
+	}
+
 private:
 	void OnNavigationViewContextMenuRequested(const QPoint& pos)
 	{
@@ -195,17 +205,11 @@ private:
 	{
 		auto       files     = m_settings->Get(Constant::INPUT_FILES).toStringList();
 		const auto languages = m_model->data({}, Role::LanguageList).toStringList();
-		try
+
+		for (auto&& file : QFileDialog::getOpenFileNames(&m_self, Tr(SELECT_FILES), {}, Tr(SELECT_JSON_FILTER)))
 		{
-			for (auto&& file : QFileDialog::getOpenFileNames(&m_self, Tr(SELECT_FILES), {}, Tr(SELECT_JSON_FILTER)))
-			{
-				m_model->setData({}, file, Role::AddFile);
-				files << std::move(file);
-			}
-		}
-		catch (const std::exception& ex)
-		{
-			QMessageBox::critical(&m_self, Tr(Constant::ERROR), ex.what());
+			m_model->setData({}, file, Role::AddFile);
+			files << std::move(file);
 		}
 
 		if (files.count() > languages.count())
@@ -230,6 +234,11 @@ private:
 			m_translation->SetLanguage(translationLanguage);
 	}
 
+	void OnActionSaveTriggered()
+	{
+		m_model->setData({}, {}, Role::Save);
+	}
+
 	void OnActionExportTriggered()
 	{
 		auto profile = m_settings->Get(PROFILE).toString();
@@ -240,24 +249,7 @@ private:
 				return;
 		}
 
-		QString errorText;
-		try
-		{
-			m_model->setData({}, profile, Role::Export);
-		}
-		catch (const std::exception& ex)
-		{
-			errorText = ex.what();
-		}
-		catch (...)
-		{
-			errorText = "Unknown save error";
-		}
-		if (errorText.isEmpty())
-			return;
-
-		QMessageBox::critical(&m_self, Tr(Constant::ERROR), errorText);
-		PLOGE << errorText;
+		m_model->setData({}, profile, Role::Export);
 	}
 
 	QString OnActionSetProfileTriggered()
@@ -286,6 +278,28 @@ private:
 												 : QMessageBox::warning(&m_self, Tr(VALIDATION_RESULT), m_model->data({}, Role::Validate).toString());
 	}
 
+	void OnActionTriggered(void (Impl::*invoker)())
+	{
+		QString errorText;
+		try
+		{
+			std::invoke(invoker, this);
+		}
+		catch (const std::exception& ex)
+		{
+			errorText = ex.what();
+		}
+		catch (...)
+		{
+			errorText = "Unknown error";
+		}
+		if (errorText.isEmpty())
+			return;
+
+		QMessageBox::critical(&m_self, Tr(Constant::ERROR), errorText);
+		PLOGE << errorText;
+	}
+
 private:
 	MainWindow& m_self;
 
@@ -293,6 +307,9 @@ private:
 	PropagateConstPtr<QAbstractItemModel, std::shared_ptr> m_model;
 	PropagateConstPtr<TranslationWidget, std::shared_ptr>  m_reference;
 	PropagateConstPtr<TranslationWidget, std::shared_ptr>  m_translation;
+
+	Util::FunctorExecutionForwarder m_forwarder;
+	const Log::LogAppender          m_logAppender { this };
 
 	Ui::MainWindow m_ui;
 };
