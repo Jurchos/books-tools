@@ -10,6 +10,8 @@ struct Role
 	enum
 	{
 		AddFile = Qt::UserRole,
+		AddTemplate,
+		QuestionTypeList,
 		LanguageList,
 		Language,
 		ReferenceLanguage,
@@ -18,6 +20,8 @@ struct Role
 		TranslationLanguage,
 		TranslationQuestion,
 		TranslationAnswer,
+		TemplateQuestion,
+		TemplateAnswer,
 		Macro,
 		Save,
 		Export,

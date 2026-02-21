@@ -23,8 +23,9 @@ public:
 	MainWindow(
 		std::shared_ptr<ISettings>          settings,
 		std::shared_ptr<QAbstractItemModel> model,
-		std::shared_ptr<TranslationWidget>  reference,
-		std::shared_ptr<TranslationWidget>  translation,
+		std::shared_ptr<TranslationWidget>  templateWidget,
+		std::shared_ptr<TranslationWidget>  referenceWidget,
+		std::shared_ptr<TranslationWidget>  translationWidget,
 		QWidget*                            parent = nullptr
 	);
 	~MainWindow() override;
