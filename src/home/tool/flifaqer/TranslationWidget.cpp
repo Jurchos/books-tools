@@ -4,9 +4,8 @@
 
 #include <ranges>
 
-#include <QScrollBar>
-
 #include "fnd/FindPair.h"
+#include "fnd/ScopedCall.h"
 
 #include "role.h"
 
@@ -27,6 +26,84 @@ struct ModeSettings
 	const char* const languageKey;
 };
 
+class Model final : public QAbstractListModel
+{
+public:
+	struct Role
+	{
+		enum
+		{
+			Row = Qt::UserRole + 1,
+			Text,
+		};
+	};
+
+public:
+	void SetData(const QString& data)
+	{
+		const ScopedCall resetGuard(
+			[this] {
+				beginResetModel();
+			},
+			[this] {
+				endResetModel();
+			}
+		);
+		m_data = data.split('\n');
+	}
+
+private: // QAbstractItemModel
+	int rowCount(const QModelIndex& parent = QModelIndex()) const override
+	{
+		return parent.isValid() ? 0 : static_cast<int>(m_data.size());
+	}
+
+	QVariant data(const QModelIndex& index, const int role) const override
+	{
+		if (index.isValid())
+		{
+			assert(index.row() >= 0 && index.row() < rowCount());
+			return role == Qt::DisplayRole ? m_data[index.row()] : QVariant {};
+		}
+
+		switch (role)
+		{
+			case Role::Row:
+				return m_row;
+			case Role::Text:
+				return m_data.join('\n');
+			default:
+				break;
+		}
+		return assert(false && "unexpected role"), QVariant {};
+	}
+
+	bool setData(const QModelIndex& /*index*/, const QVariant& value, const int role) override
+	{
+		if (role != Role::Row)
+			return false;
+
+		if (const auto it = std::ranges::find_if(
+				m_data,
+				[str = QString("%%1").arg(value.toInt())](const QString& item) {
+					return item.contains(str);
+				}
+			);
+		    it != m_data.end())
+		{
+			m_row = static_cast<int>(std::distance(m_data.begin(), it));
+			return true;
+		}
+
+		m_row = -1;
+		return false;
+	}
+
+private:
+	QStringList m_data;
+	int         m_row { -1 };
+};
+
 class TranslationWidgetImpl // NOLINT(cppcoreguidelines-special-member-functions)
 {
 public:
@@ -37,12 +114,39 @@ public:
 		, m_ui { ui }
 		, m_modeSettings { modeSettings }
 	{
+		m_ui.answer->setModel(m_dataModel.get());
+		m_ui.answer->verticalHeader()->setDefaultAlignment(Qt::AlignTop);
+		QObject::connect(m_dataModel.get(), &QAbstractItemModel::dataChanged, [this] {
+			OnDataChanged();
+		});
+		QObject::connect(m_dataModel.get(), &QAbstractItemModel::rowsInserted, [this] {
+			OnDataChanged();
+		});
+		QObject::connect(m_dataModel.get(), &QAbstractItemModel::rowsMoved, [this] {
+			OnDataChanged();
+		});
+		QObject::connect(m_dataModel.get(), &QAbstractItemModel::rowsRemoved, [this] {
+			OnDataChanged();
+		});
 	}
 
 	virtual ~TranslationWidgetImpl() = default;
 
 public:
 	virtual void SetCurrentIndex(const QModelIndex& index) = 0;
+
+	virtual void OnDataChanged() = 0;
+
+	virtual void SetRow(int)
+	{
+	}
+
+protected:
+	void Reset()
+	{
+		m_dataModel->SetData(m_model.data(m_currentIndex, m_modeSettings.answerRole).toString());
+		m_ui.answer->resizeRowsToContents();
+	}
 
 protected:
 	TranslationWidget&  m_self;
@@ -52,7 +156,8 @@ protected:
 	Ui::TranslationWidget& m_ui;
 	const ModeSettings&    m_modeSettings;
 
-	QPersistentModelIndex m_currentIndex;
+	PropagateConstPtr<Model> m_dataModel;
+	QPersistentModelIndex    m_currentIndex;
 };
 
 class TranslationWidgetCommon final : public TranslationWidgetImpl
@@ -79,15 +184,9 @@ public:
 				m_model.setData(m_currentIndex, m_ui.question->text(), m_modeSettings.questionRole);
 		});
 
-		QObject::connect(m_ui.answer, &QPlainTextEdit::textChanged, [this] {
-			if (!m_currentIndex.isValid())
-				return m_ui.numbers->setPlainText({});
-
-			m_model.setData(m_currentIndex, m_ui.answer->toPlainText(), m_modeSettings.answerRole);
-			UpdateNumbers();
+		QObject::connect(m_ui.answer->selectionModel(), &QItemSelectionModel::selectionChanged, [this] {
+			emit m_self.RowChanged(m_ui.answer->currentIndex().row() + 1);
 		});
-
-		QWidget::connect(m_ui.answer->verticalScrollBar(), &QScrollBar::valueChanged, m_ui.numbers->verticalScrollBar(), &QScrollBar::setValue);
 
 		if (m_ui.language->count() > 0)
 			OnLanguageChanged();
@@ -99,8 +198,13 @@ private: // TranslationWidgetImpl
 		m_currentIndex = index;
 		const QSignalBlocker questionSignalBlocker(m_ui.question), answerSignalBlocker(m_ui.answer);
 		m_ui.question->setText(m_model.data(index, m_modeSettings.questionRole).toString());
-		m_ui.answer->setPlainText(m_model.data(index, m_modeSettings.answerRole).toString());
-		UpdateNumbers();
+		Reset();
+	}
+
+	void OnDataChanged() override
+	{
+		if (m_currentIndex.isValid())
+			m_model.setData(m_currentIndex, static_cast<const QAbstractItemModel&>(*m_dataModel).data({}, Model::Role::Text), m_modeSettings.answerRole);
 	}
 
 private:
@@ -108,23 +212,6 @@ private:
 	{
 		m_model.setData({}, m_ui.language->currentData(), m_modeSettings.languageRole);
 		emit m_self.LanguageChanged();
-	}
-
-	void UpdateNumbers() const
-	{
-		const QFontMetrics fontMetrics(m_self.font());
-		int                maxTextWidth = 0;
-		const auto text = m_ui.answer->toPlainText();
-		m_ui.numbers->setPlainText((std::views::iota(1, text.split('\n').size() + 1) | std::views::transform([&](const int n) {
-										auto str = QString::number(n);
-										maxTextWidth = std::max(maxTextWidth, fontMetrics.boundingRect(str + "9").width());
-										return str;
-									})
-		                            | std::ranges::to<QStringList>())
-		                               .join('\n'));
-		m_ui.numbers->verticalScrollBar()->setValue(m_ui.answer->verticalScrollBar()->value());
-		m_ui.numbers->setMinimumWidth(maxTextWidth);
-		m_ui.numbers->setMaximumWidth(maxTextWidth);
 	}
 };
 
@@ -140,18 +227,10 @@ public:
 		: TranslationWidgetImpl(self, settings, model, ui, modeSettings)
 	{
 		m_ui.question->setVisible(false);
-		m_ui.numbers->setVisible(false);
+		m_ui.answer->verticalHeader()->setVisible(false);
 
 		QObject::connect(m_ui.language, &QComboBox::currentIndexChanged, [this] {
 			OnLanguageChanged();
-		});
-
-		QObject::connect(m_ui.answer, &QPlainTextEdit::textChanged, [this] {
-			if (!m_currentIndex.isValid())
-				return;
-
-			OnLanguageChanged();
-			m_model.setData(m_currentIndex, m_ui.answer->toPlainText(), m_modeSettings.answerRole);
 		});
 	}
 
@@ -160,9 +239,25 @@ private: // TranslationWidgetImpl
 	{
 		m_currentIndex = index;
 		const QSignalBlocker questionSignalBlocker(m_ui.question), answerSignalBlocker(m_ui.answer);
-		m_ui.answer->setPlainText(m_model.data(index, m_modeSettings.answerRole).toString());
 		if (const auto n = m_ui.language->findData(m_model.data(index, m_modeSettings.questionRole)); n >= 0)
 			m_ui.language->setCurrentIndex(n);
+		Reset();
+	}
+
+	void OnDataChanged() override
+	{
+		if (!m_currentIndex.isValid())
+			return;
+
+		OnLanguageChanged();
+		m_model.setData(m_currentIndex, static_cast<const QAbstractItemModel&>(*m_dataModel).data({}, Model::Role::Text), m_modeSettings.answerRole);
+	}
+
+	void SetRow(const int row) override
+	{
+		auto& dataModel = static_cast<QAbstractItemModel&>(*m_dataModel);
+		if (dataModel.setData({}, row, Model::Role::Row))
+			m_ui.answer->setCurrentIndex(dataModel.index(dataModel.data({}, Model::Role::Row).toInt(), 0));
 	}
 
 private:
@@ -216,6 +311,11 @@ public:
 			m_impl->SetCurrentIndex(index);
 	}
 
+	void SetRow(const int row)
+	{
+		m_impl->SetRow(row);
+	}
+
 private:
 	TranslationWidget&                                     m_self;
 	PropagateConstPtr<ISettings, std::shared_ptr>          m_settings;
@@ -251,4 +351,9 @@ void TranslationWidget::SetLanguage(const QString& language) const
 void TranslationWidget::SetCurrentIndex(const QModelIndex& index)
 {
 	m_impl->SetCurrentIndex(index);
+}
+
+void TranslationWidget::SetRow(const int row)
+{
+	m_impl->SetRow(row);
 }

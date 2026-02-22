@@ -76,9 +76,15 @@ public:
 		m_ui.navigatorView->setModel(m_model.get());
 		m_ui.templateLayout->addWidget(m_templateWidget.get());
 
-		const auto setView = [this](QStackedWidget* stackedWidget, const QAction* action, auto*... xs) {
-			(stackedWidget->addWidget(xs), ...);
+		const auto setView = [this](QStackedWidget* stackedWidget, const QAction* action, TranslationWidget* trWidget, TextViewWidget* textViewWidget) {
+			stackedWidget->addWidget(trWidget);
+			stackedWidget->addWidget(textViewWidget);
 			stackedWidget->setCurrentIndex(m_settings->Get(stackedWidget->objectName(), 0));
+			connect(trWidget, &TranslationWidget::RowChanged, m_templateWidget.get(), &TranslationWidget::SetRow);
+			connect(trWidget, &TranslationWidget::LanguageChanged, [this, trWidget, textViewWidget] {
+				trWidget->SetCurrentIndex(m_ui.navigatorView->currentIndex());
+				textViewWidget->SetCurrentIndex(m_ui.navigatorView->currentIndex());
+			});
 			connect(action, &QAction::triggered, [this, stackedWidget] {
 				stackedWidget->setCurrentIndex((stackedWidget->currentIndex() + 1) % stackedWidget->count());
 				m_settings->Set(stackedWidget->objectName(), stackedWidget->currentIndex());
@@ -129,14 +135,6 @@ public:
 			m_translationWidget->SetCurrentIndex(index);
 			m_referenceTextView->SetCurrentIndex(index);
 			m_translationTextView->SetCurrentIndex(index);
-		});
-		connect(m_referenceWidget.get(), &TranslationWidget::LanguageChanged, [this] {
-			m_referenceWidget->SetCurrentIndex(m_ui.navigatorView->currentIndex());
-			m_referenceTextView->SetCurrentIndex(m_ui.navigatorView->currentIndex());
-		});
-		connect(m_translationWidget.get(), &TranslationWidget::LanguageChanged, [this] {
-			m_translationWidget->SetCurrentIndex(m_ui.navigatorView->currentIndex());
-			m_translationTextView->SetCurrentIndex(m_ui.navigatorView->currentIndex());
 		});
 
 		connect(m_ui.actionAddFiles, &QAction::triggered, [this] {

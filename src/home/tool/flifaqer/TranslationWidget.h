@@ -27,6 +27,7 @@ public:
 
 signals:
 	void LanguageChanged() const;
+	void RowChanged(int row) const;
 
 public:
 	TranslationWidget(std::shared_ptr<ISettings> settings, std::shared_ptr<QAbstractItemModel> model, QWidget* parent = nullptr);
@@ -37,6 +38,7 @@ public:
 	void AddLanguage(const QString& language) const;
 	void SetLanguage(const QString& language) const;
 	void SetCurrentIndex(const QModelIndex& index);
+	void SetRow(int row);
 
 private:
 	class Impl;
