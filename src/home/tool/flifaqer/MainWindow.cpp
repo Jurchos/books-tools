@@ -169,9 +169,7 @@ public:
 
 		const auto currentStyleName = QApplication::style()->name();
 
-		for (const auto& key : QStyleFactory::keys() | std::views::filter([](const QString& theme) {
-								   return theme.compare("windows11", Qt::CaseInsensitive);
-							   }))
+		for (const auto& key : QStyleFactory::keys())
 		{
 			auto* action = m_ui.menuTheme->addAction(key);
 			action->setCheckable(true);

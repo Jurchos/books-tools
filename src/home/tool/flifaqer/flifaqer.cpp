@@ -64,13 +64,14 @@ int main(int argc, char* argv[])
 														 return QDir::fromNativeSeparators(argv[n]);
 													 }) | std::ranges::to<QStringList>());
 
-			auto availableStyles = QStyleFactory::keys() | std::views::filter([](const QString& theme) {
-									   return theme.compare("windows11", Qt::CaseInsensitive);
-								   })
-			                     | std::ranges::to<QStringList>();
+			const auto availableStyles = QStyleFactory::keys();
 			auto currentTheme = settings->Get(Constant::THEME).toString();
 			if (!availableStyles.contains(currentTheme))
+			{
 				currentTheme = availableStyles.isEmpty() ? QString() : availableStyles.front();
+				if (currentTheme == "windows11" && availableStyles.size() > 1)
+					currentTheme = availableStyles[1];
+			}
 			if (!currentTheme.isEmpty())
 				QApplication::setStyle(QStyleFactory::create(currentTheme));
 
