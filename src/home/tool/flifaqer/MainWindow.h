@@ -33,6 +33,9 @@ public:
 	);
 	~MainWindow() override;
 
+private: // QWidget
+	void closeEvent(QCloseEvent* event) override;
+
 private:
 	class Impl;
 	PropagateConstPtr<Impl> m_impl;

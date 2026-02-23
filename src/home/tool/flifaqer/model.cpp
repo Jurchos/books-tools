@@ -625,25 +625,27 @@ private:
 		switch (role)
 		{
 			case Qt::CheckStateRole:
-				return Util::Set(item->onTop, value.value<Qt::CheckState>() == Qt::Checked);
+				return Util::Set(item->onTop, value.value<Qt::CheckState>() == Qt::Checked, [&] {
+					emit dataChanged(index, index, { Qt::CheckStateRole });
+				});
 
 			case Role::TemplateQuestion:
-				return Set(item->question, Constant::TEMPLATE, index, value, { Role::ReferenceText, Role::TranslationText });
+				return Set(item->question, Constant::TEMPLATE, index, value, { Role::TemplateQuestion, Role::ReferenceText, Role::TranslationText });
 
 			case Role::TemplateAnswer:
-				return Set(item->answer, Constant::TEMPLATE, index, value, { Role::ReferenceText, Role::TranslationText });
+				return Set(item->answer, Constant::TEMPLATE, index, value, { Role::TemplateAnswer, Role::ReferenceText, Role::TranslationText });
 
 			case Role::ReferenceQuestion:
-				return Set(item->question, m_referenceLanguage, index, value, { Qt::DisplayRole, Role::ReferenceText });
+				return Set(item->question, m_referenceLanguage, index, value, { Role::ReferenceQuestion, Qt::DisplayRole, Role::ReferenceText });
 
 			case Role::ReferenceAnswer:
-				return Set(item->answer, m_referenceLanguage, index, value, { Role::ReferenceText });
+				return Set(item->answer, m_referenceLanguage, index, value, { Role::ReferenceAnswer, Role::ReferenceText });
 
 			case Role::TranslationQuestion:
-				return Set(item->question, m_translationLanguage, index, value, { Qt::DisplayRole, Role::TranslationText });
+				return Set(item->question, m_translationLanguage, index, value, { Role::TranslationQuestion, Qt::DisplayRole, Role::TranslationText });
 
 			case Role::TranslationAnswer:
-				return Set(item->answer, m_translationLanguage, index, value, { Role::TranslationText });
+				return Set(item->answer, m_translationLanguage, index, value, { Role::TranslationAnswer, Role::TranslationText });
 
 			default:
 				break;

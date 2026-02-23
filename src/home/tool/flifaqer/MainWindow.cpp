@@ -40,6 +40,8 @@ constexpr auto SELECT_FILES       = QT_TRANSLATE_NOOP("flifaqer", "Select files"
 constexpr auto SELECT_JSON_FILTER = QT_TRANSLATE_NOOP("flifaqer", "Json files (*.json);;All files (*.*)");
 constexpr auto VALIDATION_RESULT  = QT_TRANSLATE_NOOP("flifaqer", "Validation result");
 constexpr auto OK                 = QT_TRANSLATE_NOOP("flifaqer", "Everything's cool!");
+constexpr auto DATA_CHANGED       = QT_TRANSLATE_NOOP("flifaqer", "Data changed");
+constexpr auto SAVE_CHANGES       = QT_TRANSLATE_NOOP("flifaqer", "Would you like to save changes?");
 
 }
 
@@ -154,6 +156,10 @@ public:
 			OnActionSetTemplateTriggered();
 		});
 
+		connect(m_model.get(), &QAbstractItemModel::dataChanged, [this] {
+			m_dataChanged = true;
+		});
+
 		const auto incrementFontSize = [&](const int value) {
 			const auto fontSize = m_settings->Get(FONT_SIZE_KEY, 10);
 			m_settings->Set(FONT_SIZE_KEY, fontSize + value);
@@ -190,6 +196,28 @@ public:
 	~Impl() override
 	{
 		SaveGeometry();
+	}
+
+	bool Close()
+	{
+		if (!m_dataChanged)
+			return true;
+
+		QMessageBox msgBox(QMessageBox::Icon::Question, Tr(DATA_CHANGED), Tr(SAVE_CHANGES), QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel, &m_self);
+		msgBox.setFont(m_self.font());
+
+		switch (msgBox.exec())
+		{
+			case QMessageBox::No:
+				return true;
+
+			case QMessageBox::Yes:
+				return OnActionSaveTriggered(), true;
+
+			default:
+				break;
+		}
+		return false;
 	}
 
 private: // plog::IAppender
@@ -265,6 +293,7 @@ private:
 	void OnActionSaveTriggered()
 	{
 		m_model->setData({}, {}, Role::Save);
+		m_dataChanged = false;
 	}
 
 	void OnActionExportTriggered()
@@ -339,6 +368,7 @@ private:
 	PropagateConstPtr<TextViewWidget, std::shared_ptr>     m_referenceTextView;
 	PropagateConstPtr<TextViewWidget, std::shared_ptr>     m_translationTextView;
 
+	bool                            m_dataChanged { false };
 	Util::FunctorExecutionForwarder m_forwarder;
 	const Log::LogAppender          m_logAppender { this };
 
@@ -361,3 +391,9 @@ MainWindow::MainWindow(
 }
 
 MainWindow::~MainWindow() = default;
+
+void MainWindow::closeEvent(QCloseEvent* event)
+{
+	if (!m_impl->Close())
+		event->ignore();
+}

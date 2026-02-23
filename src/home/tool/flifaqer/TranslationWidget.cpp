@@ -7,6 +7,7 @@
 #include "fnd/FindPair.h"
 #include "fnd/ScopedCall.h"
 
+#include "log.h"
 #include "role.h"
 
 using namespace HomeCompa::FliFaq;
@@ -38,20 +39,6 @@ public:
 		};
 	};
 
-public:
-	void SetData(const QString& data)
-	{
-		const ScopedCall resetGuard(
-			[this] {
-				beginResetModel();
-			},
-			[this] {
-				endResetModel();
-			}
-		);
-		m_data = data.split('\n');
-	}
-
 private: // QAbstractItemModel
 	int rowCount(const QModelIndex& parent = QModelIndex()) const override
 	{
@@ -78,25 +65,51 @@ private: // QAbstractItemModel
 		return assert(false && "unexpected role"), QVariant {};
 	}
 
-	bool setData(const QModelIndex& /*index*/, const QVariant& value, const int role) override
+	bool setData(const QModelIndex& index, const QVariant& value, const int role) override
 	{
-		if (role != Role::Row)
-			return false;
+		if (index.isValid())
+			return QAbstractListModel::setData(index, value, role);
 
-		if (const auto it = std::ranges::find_if(
-				m_data,
-				[str = QString("%%1").arg(value.toInt())](const QString& item) {
-					return item.contains(str);
-				}
-			);
-		    it != m_data.end())
+		switch (role)
 		{
-			m_row = static_cast<int>(std::distance(m_data.begin(), it));
-			return true;
+			case Role::Row:
+				if (const auto it = std::ranges::find_if(
+						m_data,
+						[str = QString("%%1").arg(value.toInt())](const QString& item) {
+							return item.contains(str);
+						}
+					);
+				    it != m_data.end())
+				{
+					m_row = static_cast<int>(std::distance(m_data.begin(), it));
+					return true;
+				}
+				m_row = -1;
+				return false;
+
+			case Role::Text:
+			{
+				auto data = value.toString().split('\n');
+				if (m_data == data)
+					return false;
+
+				const ScopedCall resetGuard(
+					[this] {
+						beginResetModel();
+					},
+					[this] {
+						endResetModel();
+					}
+				);
+				m_data = std::move(data);
+				return true;
+			}
+
+			default:
+				break;
 		}
 
-		m_row = -1;
-		return false;
+		return assert(false && "unexpected role"), false;
 	}
 
 private:
@@ -116,17 +129,18 @@ public:
 	{
 		m_ui.answer->setModel(m_dataModel.get());
 		m_ui.answer->verticalHeader()->setDefaultAlignment(Qt::AlignTop);
-		QObject::connect(m_dataModel.get(), &QAbstractItemModel::dataChanged, [this] {
-			OnDataChanged();
+		QObject::connect(m_ui.answer, &TableView::mouseDoubleClicked, [this] {
+			m_ui.answerEdit->setPlainText(GetModel().data({}, Model::Role::Text).toString());
+			m_ui.stackedWidget->setCurrentWidget(m_ui.pageAnswerEdit);
 		});
-		QObject::connect(m_dataModel.get(), &QAbstractItemModel::rowsInserted, [this] {
-			OnDataChanged();
+
+		QObject::connect(m_ui.stackedWidget, &QStackedWidget::currentChanged, [this] {
+			if (m_ui.stackedWidget->currentWidget() == m_ui.pageAnswer && m_currentIndex.isValid())
+				m_model.setData(m_currentIndex, m_ui.answerEdit->toPlainText(), m_modeSettings.answerRole);
 		});
-		QObject::connect(m_dataModel.get(), &QAbstractItemModel::rowsMoved, [this] {
-			OnDataChanged();
-		});
-		QObject::connect(m_dataModel.get(), &QAbstractItemModel::rowsRemoved, [this] {
-			OnDataChanged();
+		QObject::connect(&m_model, &QAbstractItemModel::dataChanged, [this](const QModelIndex&, const QModelIndex&, const QList<int>& roles) {
+			if (roles.contains(m_modeSettings.answerRole))
+				Reset();
 		});
 	}
 
@@ -142,9 +156,15 @@ public:
 	}
 
 protected:
+	QAbstractItemModel& GetModel() noexcept
+	{
+		return *m_dataModel;
+	}
+
+protected:
 	void Reset()
 	{
-		m_dataModel->SetData(m_model.data(m_currentIndex, m_modeSettings.answerRole).toString());
+		GetModel().setData({}, m_model.data(m_currentIndex, m_modeSettings.answerRole).toString(), Model::Role::Text);
 		m_ui.answer->resizeRowsToContents();
 	}
 
@@ -204,7 +224,7 @@ private: // TranslationWidgetImpl
 	void OnDataChanged() override
 	{
 		if (m_currentIndex.isValid())
-			m_model.setData(m_currentIndex, static_cast<const QAbstractItemModel&>(*m_dataModel).data({}, Model::Role::Text), m_modeSettings.answerRole);
+			m_model.setData(m_currentIndex, GetModel().data({}, Model::Role::Text), m_modeSettings.answerRole);
 	}
 
 private:
@@ -250,14 +270,13 @@ private: // TranslationWidgetImpl
 			return;
 
 		OnLanguageChanged();
-		m_model.setData(m_currentIndex, static_cast<const QAbstractItemModel&>(*m_dataModel).data({}, Model::Role::Text), m_modeSettings.answerRole);
+		m_model.setData(m_currentIndex, GetModel().data({}, Model::Role::Text), m_modeSettings.answerRole);
 	}
 
 	void SetRow(const int row) override
 	{
-		auto& dataModel = static_cast<QAbstractItemModel&>(*m_dataModel);
-		if (dataModel.setData({}, row, Model::Role::Row))
-			m_ui.answer->setCurrentIndex(dataModel.index(dataModel.data({}, Model::Role::Row).toInt(), 0));
+		if (GetModel().setData({}, row, Model::Role::Row))
+			m_ui.answer->setCurrentIndex(GetModel().index(GetModel().data({}, Model::Role::Row).toInt(), 0));
 	}
 
 private:
@@ -285,6 +304,7 @@ public:
 		, m_model { std::move(model) }
 	{
 		m_ui.setupUi(&m_self);
+		m_ui.answerEdit->installEventFilter(&m_self);
 	}
 
 public:
@@ -314,6 +334,14 @@ public:
 	void SetRow(const int row)
 	{
 		m_impl->SetRow(row);
+	}
+
+	bool EventFilter(QObject* /*watched*/, const QEvent* event) const
+	{
+		if (event->type() == QEvent::FocusOut)
+			m_ui.stackedWidget->setCurrentWidget(m_ui.pageAnswer);
+
+		return false;
 	}
 
 private:
@@ -356,4 +384,9 @@ void TranslationWidget::SetCurrentIndex(const QModelIndex& index)
 void TranslationWidget::SetRow(const int row)
 {
 	m_impl->SetRow(row);
+}
+
+bool TranslationWidget::eventFilter(QObject* watched, QEvent* event)
+{
+	return m_impl->EventFilter(watched, event);
 }

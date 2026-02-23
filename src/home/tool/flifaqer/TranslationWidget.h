@@ -40,6 +40,9 @@ public:
 	void SetCurrentIndex(const QModelIndex& index);
 	void SetRow(int row);
 
+private: // QObject
+	bool eventFilter(QObject* watched, QEvent* event) override;
+
 private:
 	class Impl;
 	PropagateConstPtr<Impl> m_impl;
