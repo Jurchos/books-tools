@@ -65,7 +65,7 @@ int main(int argc, char* argv[])
 													 }) | std::ranges::to<QStringList>());
 
 			const auto availableStyles = QStyleFactory::keys();
-			auto currentTheme = settings->Get(Constant::THEME).toString();
+			auto       currentTheme    = settings->Get(Constant::THEME).toString();
 			if (!availableStyles.contains(currentTheme))
 			{
 				currentTheme = availableStyles.isEmpty() ? QString() : availableStyles.front();

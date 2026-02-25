@@ -5,9 +5,9 @@
 #include "fnd/NonCopyMovable.h"
 #include "fnd/memory.h"
 
-#include "TextViewWidget.h"
 #include "util/ISettings.h"
 
+#include "TextViewWidget.h"
 #include "TranslationWidget.h"
 
 class QAbstractItemModel;
