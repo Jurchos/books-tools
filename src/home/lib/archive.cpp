@@ -76,9 +76,9 @@ Archives GetArchives(const QStringList& wildCards)
 size_t Total(const Archives& archives)
 {
 	PLOGD << "Total file count calculation";
-	const auto totalFileCount = std::accumulate(archives.cbegin(), archives.cend(), size_t { 0 }, [](const size_t init, const Archive& archive) {
+	const auto totalFileCount = std::accumulate(archives.cbegin(), archives.cend(), 0ULL, [](const auto init, const auto& archive) {
 		const Zip zip(archive.filePath);
-		return init + zip.GetFileNameList().size();
+		return init + static_cast<size_t>(zip.GetFileNameList().size());
 	});
 	PLOGI << "Total file count: " << totalFileCount;
 

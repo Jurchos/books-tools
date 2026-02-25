@@ -174,15 +174,16 @@ ReplaceSrcValues GetReplaceSrcValues(const QJsonObject& obj, const IDump::Dictio
 
 	for (auto it = valuesObj.constBegin(), end = valuesObj.constEnd(); it != end; ++it)
 	{
-		auto& values = result.try_emplace(it.key().toLongLong()).first->second;
-		if (it.value().isString())
+		auto&      values = result.try_emplace(it.key().toLongLong()).first->second;
+		const auto value  = it.value();
+		if (value.isString())
 		{
-			values.push_back(it.value().toString());
+			values.push_back(value.toString());
 			continue;
 		}
 
-		assert(it.value().isObject());
-		const auto valueObj = it.value().toObject();
+		assert(value.isObject());
+		const auto valueObj = value.toObject();
 		std::ranges::transform(tableDescription.names, std::back_inserter(values), [&](const auto& name) {
 			return valueObj[name].toString();
 		});
