@@ -31,13 +31,12 @@ namespace
 constexpr auto LANGUAGE = "language";
 constexpr auto MACRO    = "macro";
 constexpr auto QUESTION = "question";
-constexpr auto ANSWER   = "answer";
 constexpr auto NAME     = "name";
 constexpr auto TAGS     = "tags";
 constexpr auto Q        = "q";
 constexpr auto A        = "t";
-constexpr auto ON_TOP   = "v";
 constexpr auto ITEMS    = "x";
+constexpr auto ID       = "id";
 
 constexpr QChar STRING_SEPARATOR = '\n';
 
@@ -217,28 +216,11 @@ struct Item
 	String answer;
 
 	Items children;
-	bool  onTop { false };
 };
 
-//void ExportImage(const QString& answer, QTextStream& stream)
-//{
-//	static const QRegularExpression rx(R"(^\[img (\S+?) (\S+?) (\S+?)\]$)");
-//
-//	const auto match = rx.match(answer);
-//	if (match.hasMatch())
-//		stream << QString(R"(<p class="img"><img src="img/%1/%2.jpg" alt="&#128558; image lost" class="img%3">)").arg(match.captured(1), match.captured(2), match.captured(3)) << STRING_SEPARATOR;
-//}
+[[nodiscard]] QString GetText(const Profile& profile, const QString& language, const Item& item, bool recursive = false);
 
-//void ExportId(const QString& answer, QTextStream& stream)
-//{
-//	static const QRegularExpression rx(R"(^\[id (\S+) *?(\S*)\]$)");
-//
-//	const auto match = rx.match(answer);
-//	if (match.hasMatch())
-//		stream << QString(R"(<p id="%1"%2>)").arg(match.captured(1), match.captured(2).isEmpty() ? "" : QString(R"( class="%1")").arg(match.captured(2)));
-//}
-
-[[nodiscard]] QString ExportAnswer(const Profile& profile, const QString& language, const Item& item)
+[[nodiscard]] QString ExportAnswer(const Profile& profile, const QString& language, const Item& item, const bool recursive)
 {
 	auto answer = item.answer(Constant::TEMPLATE);
 	for (const auto& [expression, replacement] : profile.tags)
@@ -246,12 +228,14 @@ struct Item
 
 	for (const auto& string : item.answer(language).split(STRING_SEPARATOR))
 		answer = answer.arg(string);
+
+	for (const auto& child : item.children)
+		answer.replace(QString(R"([q%1])").arg(child->row), recursive ? GetText(profile, language, *child, recursive) : QString("<br><b>+ %1</b>").arg(child->question(language)));
+
 	return answer;
 }
 
-[[nodiscard]] QString ExportImpl(const Profile& profile, const QString& language, const Item& parent, bool onTop = false, size_t level = 0, bool recursive = true);
-
-[[nodiscard]] QString GetText(const Profile& profile, const QString& language, const Item& item, const size_t level = 0, const bool recursive = false)
+[[nodiscard]] QString GetText(const Profile& profile, const QString& language, const Item& item, const bool recursive)
 {
 	QString    result;
 	const auto it = std::ranges::find(profile.question, item.question(Constant::TEMPLATE), [](const auto& question) {
@@ -263,24 +247,18 @@ struct Item
 
 	auto [questionBefore, questionAfter] = it->second;
 	result.append(questionBefore.replace("#QUESTION#", item.question(language)));
-	if (recursive)
-		result.append(ExportImpl(profile, language, item, true, level + 1, true));
-	result.append(ExportAnswer(profile, language, item));
-	if (recursive)
-		result.append(ExportImpl(profile, language, item, false, level + 1, true));
+	result.append(ExportAnswer(profile, language, item, recursive));
 	result.append(questionAfter.replace("#QUESTION#", item.question(language)));
 
 	return result;
 }
 
-[[nodiscard]] QString ExportImpl(const Profile& profile, const QString& language, const Item& parent, const bool onTop, const size_t level, const bool recursive)
+[[nodiscard]] QString ExportImpl(const Profile& profile, const QString& language, const Item& parent, const bool recursive = true)
 {
 	QString result;
 	assert(!profile.question.empty());
-	for (const auto& child : parent.children | std::views::filter([&](const auto& item) {
-								 return item->onTop == onTop;
-							 }))
-		result.append(GetText(profile, language, *child, level, recursive));
+	for (const auto& child : parent.children)
+		result.append(GetText(profile, language, *child, recursive));
 
 	return result;
 }
@@ -309,7 +287,6 @@ void ParseItems(const QString& language, const QJsonArray& jsonArray, const std:
 		auto&      child = row < static_cast<int>(parent->children.size()) ? parent->children[row] : parent->children.emplace_back(std::make_shared<Item>(parent.get(), row));
 		child->question.Set(language, obj.value(Q).toString());
 		child->answer.Set(language, ToString(obj.value(A)));
-		child->onTop = obj.value(ON_TOP).toBool();
 		ParseItems(language, obj.value(ITEMS).toArray(), child);
 	}
 }
@@ -340,10 +317,15 @@ File ParseFile(QString file, const std::shared_ptr<Item>& root, Replacements& re
 	return std::make_pair(std::move(language), std::move(file));
 }
 
-QJsonArray SaveImpl(const QString& language, const Item& item)
+QJsonArray SaveImpl(const QString& language, const Item& parent)
 {
 	QJsonArray jsonArray;
-	for (const auto& child : item.children)
+
+	const auto getId = [](const Item& item, const auto& r) -> QString {
+		return item.parent && item.parent->row >= 0 ? QString("%1/%2").arg(r(*item.parent, r)).arg(item.row) : QString::number(item.row);
+	};
+
+	for (const auto& child : parent.children)
 	{
 		QJsonArray answer;
 		{
@@ -353,12 +335,11 @@ QJsonArray SaveImpl(const QString& language, const Item& item)
 		}
 
 		QJsonObject obj {
+			{ ID, getId(*child, getId) },
 			{ Q, child->question(language) },
 		};
 		if (!answer.isEmpty())
 			obj.insert(A, std::move(answer));
-		if (child->onTop)
-			obj.insert(ON_TOP, true);
 
 		if (!child->children.empty())
 			obj.insert(ITEMS, SaveImpl(language, *child));
@@ -467,11 +448,6 @@ private: // QAbstractItemModel
 		return true;
 	}
 
-	Qt::ItemFlags flags(const QModelIndex& index) const override
-	{
-		return QAbstractItemModel::flags(index) | Qt::ItemIsUserCheckable;
-	}
-
 private:
 	[[nodiscard]] QVariant GetDataImpl(const int role) const
 	{
@@ -509,9 +485,6 @@ private:
 		{
 			case Qt::DisplayRole:
 				return item->question(m_language);
-
-			case Qt::CheckStateRole:
-				return item->onTop ? Qt::Checked : Qt::Unchecked;
 
 			case Qt::ForegroundRole:
 				return std::ranges::any_of(
@@ -624,11 +597,6 @@ private:
 
 		switch (role)
 		{
-			case Qt::CheckStateRole:
-				return Util::Set(item->onTop, value.value<Qt::CheckState>() == Qt::Checked, [&] {
-					emit dataChanged(index, index, { Qt::CheckStateRole });
-				});
-
 			case Role::TemplateQuestion:
 				return Set(item->question, Constant::TEMPLATE, index, value, { Role::TemplateQuestion, Role::ReferenceText, Role::TranslationText });
 

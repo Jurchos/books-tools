@@ -80,22 +80,22 @@ public:
 		m_ui.navigatorView->setModel(m_model.get());
 		m_ui.templateLayout->addWidget(m_templateWidget.get());
 
-		const auto setView = [this](QStackedWidget* stackedWidget, const QAction* action, TranslationWidget* trWidget, TextViewWidget* textViewWidget) {
+		const auto setView = [this](QStackedWidget* stackedWidget, const QAction* action, TranslationWidget* trWidget, TextViewWidget* ourTextViewWidget, TextViewWidget* theirTextViewWidget) {
 			stackedWidget->addWidget(trWidget);
-			stackedWidget->addWidget(textViewWidget);
+			stackedWidget->addWidget(theirTextViewWidget);
 			stackedWidget->setCurrentIndex(m_settings->Get(stackedWidget->objectName(), 0));
 			connect(trWidget, &TranslationWidget::RowChanged, m_templateWidget.get(), &TranslationWidget::SetRow);
-			connect(trWidget, &TranslationWidget::LanguageChanged, [this, trWidget, textViewWidget] {
+			connect(trWidget, &TranslationWidget::LanguageChanged, [this, trWidget, ourTextViewWidget] {
 				trWidget->SetCurrentIndex(m_ui.navigatorView->currentIndex());
-				textViewWidget->SetCurrentIndex(m_ui.navigatorView->currentIndex());
+				ourTextViewWidget->SetCurrentIndex(m_ui.navigatorView->currentIndex());
 			});
 			connect(action, &QAction::triggered, [this, stackedWidget] {
 				stackedWidget->setCurrentIndex((stackedWidget->currentIndex() + 1) % stackedWidget->count());
 				m_settings->Set(stackedWidget->objectName(), stackedWidget->currentIndex());
 			});
 		};
-		setView(m_ui.referenceView, m_ui.actionToggleReferenceView, m_referenceWidget.get(), m_translationTextView.get());
-		setView(m_ui.translationView, m_ui.actionToggleTranslationView, m_translationWidget.get(), m_referenceTextView.get());
+		setView(m_ui.referenceView, m_ui.actionToggleReferenceView, m_referenceWidget.get(), m_referenceTextView.get(), m_translationTextView.get());
+		setView(m_ui.translationView, m_ui.actionToggleTranslationView, m_translationWidget.get(), m_translationTextView.get(), m_referenceTextView.get());
 
 		for (const auto& language : m_model->data({}, Role::LanguageList).toStringList())
 			AddLanguage(language);

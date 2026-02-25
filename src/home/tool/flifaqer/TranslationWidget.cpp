@@ -145,33 +145,19 @@ public:
 		m_ui.answer->setModel(m_dataModel.get());
 		m_ui.answer->verticalHeader()->setDefaultAlignment(Qt::AlignTop);
 		QObject::connect(m_ui.answer, &TableView::mouseDoubleClicked, [this] {
-			m_ui.answerEdit->setPlainText(GetModel().data({}, Model::Role::Text).toString());
-			m_ui.stackedWidget->setCurrentWidget(m_ui.pageAnswerEdit);
+			StartEditing();
+		});
 
-			auto       cursor   = m_ui.answerEdit->textCursor();
-			auto       position = GetModel().data(m_ui.answer->currentIndex(), Model::Role::CharCount).toInt();
-			const auto width    = m_ui.answer->mapFromGlobal(QCursor::pos()).x();
-
-			const QFontMetrics fontMetrics(m_ui.answer->font());
-			const auto         str = GetModel().data(m_ui.answer->currentIndex(), Qt::DisplayRole).toString();
-			QString            buf;
-			buf.reserve(str.size());
-			for (const auto ch : str)
-			{
-				buf.append(ch);
-				if (fontMetrics.boundingRect(buf).width() > width)
-					break;
-				++position;
-			}
-
-			cursor.setPosition(position);
-			m_ui.answerEdit->setTextCursor(cursor);
+		QObject::connect(m_ui.question, &QLineEdit::editingFinished, [this] {
+			if (m_currentIndex.isValid())
+				m_model.setData(m_currentIndex, m_ui.question->text(), m_modeSettings.questionRole);
 		});
 
 		QObject::connect(m_ui.stackedWidget, &QStackedWidget::currentChanged, [this] {
 			if (m_ui.stackedWidget->currentWidget() == m_ui.pageAnswer && m_currentIndex.isValid())
 				m_model.setData(m_currentIndex, m_ui.answerEdit->toPlainText(), m_modeSettings.answerRole);
 		});
+
 		QObject::connect(&m_model, &QAbstractItemModel::dataChanged, [this](const QModelIndex&, const QModelIndex&, const QList<int>& roles) {
 			if (roles.contains(m_modeSettings.answerRole))
 				Reset();
@@ -181,7 +167,13 @@ public:
 	virtual ~TranslationWidgetImpl() = default;
 
 public:
-	virtual void SetCurrentIndex(const QModelIndex& index) = 0;
+	virtual void SetCurrentIndex(const QModelIndex& index)
+	{
+		m_currentIndex = index;
+		const QSignalBlocker questionSignalBlocker(m_ui.question), answerSignalBlocker(m_ui.answer);
+		m_ui.question->setText(m_model.data(index, m_modeSettings.questionRole).toString());
+		Reset();
+	}
 
 	virtual void SetRow(int)
 	{
@@ -194,6 +186,31 @@ protected:
 	}
 
 protected:
+	void StartEditing()
+	{
+		m_ui.answerEdit->setPlainText(GetModel().data({}, Model::Role::Text).toString());
+		m_ui.stackedWidget->setCurrentWidget(m_ui.pageAnswerEdit);
+
+		auto       cursor   = m_ui.answerEdit->textCursor();
+		auto       position = GetModel().data(m_ui.answer->currentIndex(), Model::Role::CharCount).toInt();
+		const auto width    = m_ui.answer->mapFromGlobal(QCursor::pos()).x();
+
+		const QFontMetrics fontMetrics(m_ui.answer->font());
+		const auto         str = GetModel().data(m_ui.answer->currentIndex(), Qt::DisplayRole).toString();
+		QString            buf;
+		buf.reserve(str.size());
+		for (const auto ch : str)
+		{
+			buf.append(ch);
+			if (fontMetrics.boundingRect(buf).width() > width)
+				break;
+			++position;
+		}
+
+		cursor.setPosition(position);
+		m_ui.answerEdit->setTextCursor(cursor);
+	}
+
 	void Reset()
 	{
 		GetModel().setData({}, m_model.data(m_currentIndex, m_modeSettings.answerRole).toString(), Model::Role::Text);
@@ -231,26 +248,12 @@ public:
 			OnLanguageChanged();
 		});
 
-		QObject::connect(m_ui.question, &QLineEdit::editingFinished, [this] {
-			if (m_currentIndex.isValid())
-				m_model.setData(m_currentIndex, m_ui.question->text(), m_modeSettings.questionRole);
-		});
-
 		QObject::connect(m_ui.answer->selectionModel(), &QItemSelectionModel::selectionChanged, [this] {
 			emit m_self.RowChanged(m_ui.answer->currentIndex().row() + 1);
 		});
 
 		if (m_ui.language->count() > 0)
 			OnLanguageChanged();
-	}
-
-private: // TranslationWidgetImpl
-	void SetCurrentIndex(const QModelIndex& index) override
-	{
-		m_currentIndex = index;
-		const QSignalBlocker questionSignalBlocker(m_ui.question), answerSignalBlocker(m_ui.answer);
-		m_ui.question->setText(m_model.data(index, m_modeSettings.questionRole).toString());
-		Reset();
 	}
 
 private:
@@ -283,11 +286,10 @@ public:
 private: // TranslationWidgetImpl
 	void SetCurrentIndex(const QModelIndex& index) override
 	{
-		m_currentIndex = index;
-		const QSignalBlocker questionSignalBlocker(m_ui.question), answerSignalBlocker(m_ui.answer);
-		if (const auto n = m_ui.language->findData(m_model.data(index, m_modeSettings.questionRole)); n >= 0)
+		TranslationWidgetImpl::SetCurrentIndex(index);
+		const QSignalBlocker questionSignalBlocker(m_ui.language);
+		if (const auto n = m_ui.language->findData(m_model.data(index, m_modeSettings.languageRole)); n >= 0)
 			m_ui.language->setCurrentIndex(n);
-		Reset();
 	}
 
 	void SetRow(const int row) override
