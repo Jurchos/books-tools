@@ -13,7 +13,7 @@ class ContainerBuilder;
 namespace HomeCompa::FliFaq
 {
 
-inline constexpr auto APP_ID = "flifaqer";
+inline constexpr auto APP_ID = "fliFAQer";
 
 void DiInit(Hypodermic::ContainerBuilder& builder, std::shared_ptr<Hypodermic::Container>& container);
 

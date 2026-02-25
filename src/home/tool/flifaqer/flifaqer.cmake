@@ -6,7 +6,7 @@ CreateWinRC(app
     	APP_VERSION       ${PRODUCT_VERSION}
 )
 
-AddTarget(flifaqer	app
+AddTarget(fliFAQer	app
 	PROJECT_GROUP App
 	WIN_RC ${CMAKE_BINARY_DIR}/resources/app.rc
 	SOURCE_DIRECTORY

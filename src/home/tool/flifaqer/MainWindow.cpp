@@ -42,6 +42,8 @@ constexpr auto VALIDATION_RESULT  = QT_TRANSLATE_NOOP("flifaqer", "Validation re
 constexpr auto OK                 = QT_TRANSLATE_NOOP("flifaqer", "Everything's cool!");
 constexpr auto DATA_CHANGED       = QT_TRANSLATE_NOOP("flifaqer", "Data changed");
 constexpr auto SAVE_CHANGES       = QT_TRANSLATE_NOOP("flifaqer", "Would you like to save changes?");
+constexpr auto ABOUT_TITLE        = QT_TRANSLATE_NOOP("flifaqer", "About fliFAQer");
+constexpr auto ABOUT_TEXT         = QT_TRANSLATE_NOOP("flifaqer", "fliFAQer: question-and-answer reference html generator");
 
 }
 
@@ -169,6 +171,9 @@ public:
 		});
 		connect(m_ui.actionFontSizeDown, &QAction::triggered, &m_self, [=] {
 			incrementFontSize(-1);
+		});
+		connect(m_ui.actionAboutFlifaqer, &QAction::triggered, &m_self, [this] {
+			ShowAbout();
 		});
 
 		const auto currentStyleName = QApplication::style()->name();
@@ -355,6 +360,16 @@ private:
 
 		QMessageBox::critical(&m_self, Tr(Constant::ERROR), errorText);
 		PLOGE << errorText;
+	}
+
+	void ShowAbout() const
+	{
+		QMessageBox about(&m_self);
+		about.setWindowTitle(Tr(ABOUT_TITLE));
+		about.setText(Tr(ABOUT_TEXT));
+		about.setIconPixmap(QPixmap(":/icons/main.ico"));
+		about.setFont(m_self.font());
+		about.exec();
 	}
 
 private:
