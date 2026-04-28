@@ -25,12 +25,10 @@
 #include "fnd/ScopedCall.h"
 #include "fnd/algorithm.h"
 
-#include "icu/icu.h"
 #include "jxl/jxl.h"
 #include "lib/ImageItem.h"
 #include "lib/book.h"
 #include "lib/dump/Factory.h"
-#include "lib/util.h"
 #include "logging/LogAppender.h"
 #include "logging/init.h"
 #include "util/ISettings.h"
@@ -472,11 +470,13 @@ private:
 			return WriteErrorImpl(m_settings.dstDir, m_fileSystemGuard, fileInfo.completeBaseName(), "fb2", inputFileBody), false;
 
 #ifndef NDEBUG
-//		WriteError(fileInfo.completeBaseName() + "_fix", fixedInputFileBody, QString("Validation %1 failed: %2").arg(outputFilePath, ""), true, "fb2", false);
-//		WriteError(fileInfo.completeBaseName() + "_out", bodyOutput, QString("Validation %1 failed: %2").arg(outputFilePath, ""), true, "fb2", false);
+		WriteError(fileInfo.completeBaseName() + "_fix", fixedInputFileBody, QString("Validation %1 failed: %2").arg(outputFilePath, ""), true, "fb2");
 #endif
 		if (const auto errorText = Validate(m_validator, bodyOutput); !errorText.isEmpty())
+		{
+			WriteError(fileInfo.completeBaseName() + "_out", bodyOutput, QString("Validation %1 failed: %2").arg(outputFilePath, ""), true, "fb2");
 			return WriteError(fileInfo.completeBaseName(), inputFileBody, QString("Validation %1 failed: %2").arg(outputFilePath, errorText), true, "fb2"), true;
+		}
 
 		if (!m_settings.saveFb2)
 			return false;
