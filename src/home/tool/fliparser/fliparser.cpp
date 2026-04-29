@@ -66,8 +66,9 @@ constexpr auto APP_ID = "fliparser";
 
 const auto DASH = QString(" %1 ").arg(QChar { 0x2013 });
 
-using BookItem    = std::pair<QString, QString>;
-using Replacement = std::unordered_map<BookItem, BookItem, Util::PairHash<QString, QString>>;
+using BookItem      = std::pair<QString, QString>;
+using Replacement   = std::unordered_map<BookItem, BookItem, Util::PairHash<QString, QString>>;
+using SectionToBook = std::unordered_multimap<QString, Book*>;
 
 struct Settings
 {
@@ -180,7 +181,7 @@ public:
 
 	~AnnotationCollector() override
 	{
-		PLOGI << "Archive annotations";
+		PLOGI << "archive annotations";
 		m_data.reset();
 
 		const auto zipFileName = Platform::PathToString(m_outputFolder / Inpx::ANNOTATIONS);
@@ -276,41 +277,36 @@ private:
 class CompilationHandler final : Util::HashParser::IObserver
 {
 public:
-	CompilationHandler(const Archives& archives, const InpDataProvider& inpDataProvider, IAnnotationCollector& annotationCollector)
-		: m_inpDataProvider { inpDataProvider }
-		, m_annotationCollector { annotationCollector }
-		, m_sectionToBook { m_inpDataProvider.Books() | std::views::transform([](Book* book) {
-								return std::make_pair(book->id, book);
-							})
-		                    | std::ranges::to<std::unordered_multimap<QString, Book*>>() }
-		, m_progress { archives.size(), "compilations" }
+	struct ParseStorage
 	{
-		if (m_sectionToBook.empty())
-			return;
-
-		for (const auto& archive : archives | std::views::filter([](const auto& item) {
-									   return !item.hashPath.isEmpty();
-								   }) | std::views::reverse)
+		struct DataItem
 		{
-			m_folderExt = QFileInfo(archive.filePath).suffix().toLower();
-			m_annotationCollector.StartFolder();
+			QString     folder;
+			QString     file;
+			QStringList annotation;
+		};
 
-			QFile file(archive.hashPath);
-			if (!file.open(QIODevice::ReadOnly))
-				throw std::invalid_argument(std::format("Cannot read from {}", archive.hashPath));
+		std::reference_wrapper<const Archive> archive;
+		QByteArray                            bytes;
+		std::vector<QJsonObject>              compilations;
+		std::vector<DataItem>                 data;
 
-			Util::HashParser::Parse(file, *this);
-			m_progress.Increment(1, QFileInfo(archive.hashPath).fileName().toStdString());
-		}
-	}
+		using Ptr = std::unique_ptr<ParseStorage>;
+	};
 
-	QByteArray GetResult() const
+public:
+	CompilationHandler(const InpDataProvider& inpDataProvider, const SectionToBook& sectionToBook, ParseStorage& parseStorage)
+		: m_inpDataProvider { inpDataProvider }
+		, m_sectionToBook { sectionToBook }
+		, m_folderExt { QFileInfo(parseStorage.archive.get().filePath).suffix().toLower() }
+		, m_parseStorage { parseStorage }
 	{
-		if (!m_compilations.isEmpty())
-			return QJsonDocument(std::move(m_compilations)).toJson();
+		assert(!m_sectionToBook.empty());
 
-		PLOGI << "compilations not found";
-		return {};
+		QBuffer buffer(&parseStorage.bytes);
+		buffer.open(QIODevice::ReadOnly);
+		Util::HashParser::Parse(buffer, *this);
+		parseStorage.bytes.clear();
 	}
 
 private: // HashParser::IObserver
@@ -336,7 +332,8 @@ private: // HashParser::IObserver
 			if (const auto pos = folder.lastIndexOf('.'); pos > 0)
 				folder = folder.first(pos + 1) + m_folderExt;
 
-		m_annotationCollector.Add(folder, file, annotation);
+		if (!annotation.isEmpty())
+			m_parseStorage.data.emplace_back(folder, file, std::move(annotation));
 
 		const auto enumerate =
 			[this](const Book* book, const Util::HashParser::Section& parent, QJsonArray& found, std::unordered_set<QString>& idNotFound, std::unordered_set<QString>& idFound, const auto& r) -> void {
@@ -401,19 +398,17 @@ private: // HashParser::IObserver
 			//				compilation.insert("not_found", std::move(notFound));
 			//			}
 
-			m_compilations.append(std::move(compilation));
+			m_parseStorage.compilations.emplace_back(std::move(compilation));
 		}
 
 		return true;
 	}
 
 private:
-	const InpDataProvider&                        m_inpDataProvider;
-	IAnnotationCollector&                         m_annotationCollector;
-	const std::unordered_multimap<QString, Book*> m_sectionToBook;
-	QJsonArray                                    m_compilations;
-	Util::Progress                                m_progress;
-	QString                                       m_folderExt;
+	const InpDataProvider& m_inpDataProvider;
+	const SectionToBook&   m_sectionToBook;
+	const QString          m_folderExt;
+	ParseStorage&          m_parseStorage;
 };
 
 FileInfo GetFileHash(const Zip& zip, const QString& fileName)
@@ -745,7 +740,7 @@ std::vector<std::tuple<QString, QByteArray>> CreateReviewData(const std::filesys
 		});
 	};
 
-	PLOGI << "Get review months";
+	PLOGI << "get review months";
 	std::set<std::pair<int, int>> months;
 	inpDataProvider.Enumerate([&](const QString&, const IDump& dump) {
 		std::ranges::move(dump.GetReviewMonths(), std::inserter(months, months.end()));
@@ -858,8 +853,66 @@ void CreateBookList(const std::filesystem::path& outputFolder, const InpDataProv
 void ProcessCompilations(const std::filesystem::path& outputFolder, const Archives& archives, const InpDataProvider& inpDataProvider, IAnnotationCollector& annotationCollector)
 {
 	PLOGI << "collect compilation info";
-	const CompilationHandler compilationHandler(archives, inpDataProvider, annotationCollector);
-	auto                     data = compilationHandler.GetResult();
+
+	const auto sectionToBook = inpDataProvider.Books() | std::views::transform([](Book* book) {
+								   return std::make_pair(book->id, book);
+							   })
+	                         | std::ranges::to<std::unordered_multimap<QString, Book*>>();
+	if (sectionToBook.empty())
+		return;
+
+	std::vector<CompilationHandler::ParseStorage::Ptr> storage;
+
+	{
+		Util::Progress   progress(archives.size(), "parsing");
+		Util::ThreadPool threadPool({ .maxQueueSize = std::thread::hardware_concurrency() });
+
+		for (const auto& archive : archives | std::views::filter([](const auto& item) {
+									   return !item.hashPath.isEmpty();
+								   }) | std::views::reverse)
+		{
+			auto& storageItem = storage.emplace_back(std::make_unique<CompilationHandler::ParseStorage>(archive));
+
+			{
+				QFile file(archive.hashPath);
+				if (!file.open(QIODevice::ReadOnly))
+					throw std::invalid_argument(std::format("Cannot read from {}", archive.hashPath));
+				storageItem->bytes = file.readAll();
+			}
+
+			threadPool.enqueue([&, storageItem = storageItem.get()] {
+				[[maybe_unused]] const CompilationHandler compilationHandler(inpDataProvider, sectionToBook, *storageItem);
+				progress.Increment(1, QFileInfo(archive.hashPath).fileName().toStdString());
+			});
+		}
+
+		threadPool.wait();
+	}
+
+	QJsonArray jsonArray;
+
+	size_t totalData = 0, totalCompilations = 0;
+	{
+		Util::Progress progress(storage.size(), "store parsed data");
+		for (auto& storageItem : storage)
+		{
+			annotationCollector.StartFolder();
+			for (const auto& [folder, file, annotation] : storageItem->data)
+				annotationCollector.Add(folder, file, annotation);
+
+			for (auto&& obj : storageItem->compilations)
+				jsonArray.append(std::move(obj));
+
+			progress.Increment(1, QString("%1 (%2, %3)").arg(QFileInfo(storageItem->archive.get().hashPath).fileName()).arg(storageItem->data.size()).arg(storageItem->compilations.size()).toStdString());
+			totalData         += storageItem->data.size();
+			totalCompilations += storageItem->compilations.size();
+		}
+	}
+
+	PLOGI << "total annotations: " << totalData << ", compilations: " << totalCompilations;
+
+	const auto data = QJsonDocument(jsonArray).toJson();
+
 	if (data.isEmpty())
 	{
 		PLOGI << "no compilation info";
@@ -892,8 +945,7 @@ Replacement ReadHash(InpDataProvider& inpDataProvider, Archives& archives)
 	std::vector<FileHashParser::ParseStorage::Ptr> storage;
 
 	{
-		Util::Progress progress(archives.size(), "parsing");
-
+		Util::Progress   progress(archives.size(), "parsing");
 		Util::ThreadPool threadPool({ .maxQueueSize = std::thread::hardware_concurrency() });
 
 		for (auto& archive : archives | std::views::filter([](const auto& item) {
@@ -910,7 +962,7 @@ Replacement ReadHash(InpDataProvider& inpDataProvider, Archives& archives)
 			}
 
 			threadPool.enqueue([&, storageItem = storageItem.get()] {
-				const FileHashParser parser(*storageItem);
+				[[maybe_unused]] const FileHashParser parser(*storageItem);
 				progress.Increment(1, QFileInfo(archive.hashPath).fileName().toStdString());
 			});
 		}
