@@ -57,6 +57,7 @@ constexpr auto FOLDER                       = "folder";
 constexpr auto PATH                         = "path";
 constexpr auto MAX_SERIES                   = "max-series-per-book";
 constexpr auto LIBRARY                      = "library";
+constexpr auto INPX_ONLY                    = "inpx-only";
 constexpr auto SKIP_CONTENTS                = "skip-contents";
 constexpr auto SKIP_REVIEWS                 = "skip-reviews";
 constexpr auto SKIP_COMPILATIONS            = "skip-compilations";
@@ -1054,6 +1055,7 @@ int main(int argc, char* argv[])
 			{ SKIP_REVIEWS, "Skip size readers reviews" },
 			{ SKIP_COMPILATIONS, "Skip compilations info" },
 			{ SKIP_ANNOTATIONS, "Skip annotations" },
+			{ INPX_ONLY, "Skip all except inpx" },
     }
 	);
 	const auto defaultLogPath = QString("%1/%2.%3.log").arg(QStandardPaths::writableLocation(QStandardPaths::TempLocation), COMPANY_ID, APP_ID);
@@ -1097,6 +1099,9 @@ int main(int argc, char* argv[])
 
 		MergeBookData(*inpDataProvider, replacement);
 		CreateInpx(settings, archives, *inpDataProvider);
+
+		if (parser.isSet(INPX_ONLY))
+			return 0;
 
 		if (!parser.isSet(SKIP_CONTENTS))
 			CreateBookList(settings.outputFolder, *inpDataProvider);
