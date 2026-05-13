@@ -40,12 +40,14 @@ constexpr auto TIMEOUT       = "timeout";
 constexpr auto CONFIG        = "config";
 constexpr auto ATTEMPTS      = "attempts";
 constexpr auto COUNT         = "count";
+constexpr auto READY_LIST    = "ready-list";
 
 constexpr auto DEFAULT_COUNT   = 3;
 constexpr auto DEFAULT_TIMEOUT = 5000;
 int            MAX_ATTEMPTS    = 10;
 
-QString DST_PATH;
+QString           DST_PATH;
+std::set<QString> UNIQUE_FILES;
 
 class EventLooper
 {
@@ -190,6 +192,9 @@ using TaskQueue = std::queue<std::function<void()>>;
 
 void GetFile(const QString& path, const QString& file, const QString& tmpFile, const QString& dstFile, EventLooper& eventLooper, TaskQueue& taskQueue, const int count = 1)
 {
+	if (UNIQUE_FILES.contains(file))
+		return;
+
 	auto stream = std::make_unique<QFile>(tmpFile);
 	if (!stream->open(QIODevice::WriteOnly))
 	{
@@ -199,9 +204,12 @@ void GetFile(const QString& path, const QString& file, const QString& tmpFile, c
 
 	PLOGI << "download " << path + file << " try " << count;
 
-	new Task(path, file, eventLooper, std::move(stream), [path, file, tmpFile, dstFile, &eventLooper, &taskQueue, count](const bool success) mutable {
+	new Task(path, file, eventLooper, std::move(stream), [path, file = file, tmpFile, dstFile, &eventLooper, &taskQueue, count](const bool success) mutable {
 		if (success && Validate(tmpFile, QFileInfo(dstFile).suffix().toLower()))
+		{
+			UNIQUE_FILES.emplace(std::move(file));
 			return (void)QFile::rename(tmpFile, dstFile);
+		}
 
 		if (count <= MAX_ATTEMPTS)
 			return taskQueue.push([path, file, tmpFile, dstFile, &eventLooper, &taskQueue, count] {
@@ -315,10 +323,11 @@ int main(int argc, char* argv[])
 	parser.addOptions(
 		{
 			{ { "o", OUTPUT_FOLDER },                                "Output folder",                         DST_PATH },
-			{        { "c", CONFIG },                             "Config file path", "config.json from app resources" },
+			{        { "c", CONFIG },                  "Config file path (required)",                         "config" },
 			{				TIMEOUT,          "Pause between download attempts, ms", QString::number(DEFAULT_TIMEOUT) },
 			{			   ATTEMPTS, "Maximum number of download attempts per file",    QString::number(MAX_ATTEMPTS) },
 			{				  COUNT,    "Number of files downloaded simultaneously",   QString::number(DEFAULT_COUNT) },
+			{             READY_LIST,           "Already downloaded files list file",                           "file" },
     }
 	);
 	parser.addPositionalArgument("sql", "Download dump files");
@@ -345,24 +354,17 @@ int main(int argc, char* argv[])
 		parser.showHelp(1);
 	}
 
-	auto configFileName = QFileInfo(QString(argv[0])).dir().filePath("config.json");
-	if (parser.isSet(CONFIG))
-	{
-		if (auto value = parser.value(CONFIG); QFile::exists(value))
-		{
-			configFileName = std::move(value);
-		}
-		else
-		{
-			QFile inp(":/config/config.json");
-			(void)inp.open(QIODevice::ReadOnly);
-			QFile outp(GetDownloadFileName("config.json"));
-			(void)outp.open(QIODevice::WriteOnly);
-			outp.write(inp.readAll());
-		}
-	}
+	if (!parser.isSet(CONFIG))
+		parser.showHelp(1);
+	const auto config = ReadConfig(parser.value(CONFIG));
 
-	const auto config = ReadConfig(configFileName);
+	const auto readyFiles = parser.value(READY_LIST);
+	if (!readyFiles.isEmpty())
+	{
+		QFile file(readyFiles);
+		if (file.open(QIODevice::ReadOnly))
+			UNIQUE_FILES = QString::fromUtf8(file.readAll()).split('\n') | std::ranges::to<std::set>();
+	}
 
 	EventLooper evenLooper;
 	TaskQueue   taskQueue;
@@ -394,6 +396,13 @@ int main(int argc, char* argv[])
 			break;
 
 		QThread::sleep(std::chrono::milliseconds(timeout));
+	}
+
+	if (!readyFiles.isEmpty())
+	{
+		QFile file(readyFiles);
+		if (file.open(QIODevice::WriteOnly))
+			file.write((UNIQUE_FILES | std::ranges::to<QStringList>()).join('\n').toUtf8());
 	}
 
 	return 0;
