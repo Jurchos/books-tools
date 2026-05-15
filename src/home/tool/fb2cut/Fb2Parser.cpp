@@ -34,6 +34,7 @@ constexpr auto ID     = "id";
 constexpr auto L_HREF = "l:href";
 
 constexpr auto FICTION_BOOK    = "FictionBook";
+constexpr auto BODY            = "FictionBook/body";
 constexpr auto BINARY          = "FictionBook/binary";
 constexpr auto BODY_BINARY     = "FictionBook/body/binary";
 constexpr auto COVERPAGE_IMAGE = "FictionBook/description/title-info/coverpage/image";
@@ -312,11 +313,8 @@ QByteArray ValidateFileBody(const QString& inputFilePath, const QByteArray& inpu
 	return fixedInputFileBody;
 }
 
-bool CheckImpl(const QString& fileName, QByteArray& inputFileBody)
+bool CheckImpl(QByteArray& inputFileBody)
 {
-	if (fileName.endsWith(".fbd", Qt::CaseInsensitive) || fileName.endsWith(".fbd.fb2", Qt::CaseInsensitive))
-		return false;
-
 	struct Checker : private Util::SaxParser
 	{
 		bool checked { false };
@@ -330,9 +328,23 @@ bool CheckImpl(const QString& fileName, QByteArray& inputFileBody)
 	private: // SaxParser
 		bool OnStartElement(const QString&, const QString& path, const Util::XmlAttributes&) override
 		{
-			checked = path == FICTION_BOOK;
-			return false;
+			if (path == FICTION_BOOK)
+			{
+				m_rootFound = true;
+				return true;
+			}
+
+			if (path == BODY)
+			{
+				checked = m_rootFound;
+				return false;
+			}
+
+			return true;
 		}
+
+	private:
+		bool m_rootFound { false };
 	};
 
 	QBuffer buffer(&inputFileBody);
@@ -649,7 +661,7 @@ class Fb2Parser final : public IParser
 {
 public:
 	Fb2Parser(QString inputFilePath, QByteArray inputFileBody, const IEncodingDetector& encodingDetector, const Decoder& decoder, const Util::XmlValidator& validator)
-		: m_checked { CheckImpl(inputFilePath, inputFileBody) }
+		: m_checked { CheckImpl(inputFileBody) }
 		, m_inputFilePath { std::move(inputFilePath) }
 		, m_inputFileBody { std::move(inputFileBody) }
 		, m_encodingDetector { encodingDetector }
