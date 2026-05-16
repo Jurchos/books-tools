@@ -145,12 +145,26 @@ void SerializeHashSections(const QStringList& sections, Util::XmlWriter& writer)
 	qsizetype depth = -1;
 	for (const auto& str : sections)
 	{
-		const auto split    = str.split('\t');
-		auto       newDepth = split.size() - 2;
-		const auto last     = split.rbegin();
+		const auto split = str.split('\t');
+		auto       it    = split.begin();
+		assert(it != split.end());
+
+		bool ok       = false;
+		auto newDepth = (it++)->toInt(&ok);
+		assert(ok);
 
 		const auto write = [&] {
-			writer.WriteStartElement("section").WriteAttribute("id", *std::next(last)).WriteAttribute("count", *last);
+			writer.WriteStartElement("section");
+			if (it != split.end())
+			{
+				writer.WriteAttribute("id", *it++);
+				if (it != split.end())
+				{
+					writer.WriteAttribute("count", *it++);
+					if (it != split.end())
+						writer.WriteAttribute("size", *it++);
+				}
+			}
 		};
 
 		if (depth == newDepth)
