@@ -230,10 +230,16 @@ class FileHashParser final : Util::HashParser::IObserver
 public:
 	struct ParseStorage
 	{
-		std::reference_wrapper<Archive>                  archive;
-		QByteArray                                       bytes;
-		std::vector<std::pair<BookItem, BookItem>>       replacement;
-		std::vector<std::pair<UniqueFile::Uid, QString>> data;
+		struct DataItem
+		{
+			QString uid;
+			size_t  size { 0 };
+		};
+
+		std::reference_wrapper<Archive>                   archive;
+		QByteArray                                        bytes;
+		std::vector<std::pair<BookItem, BookItem>>        replacement;
+		std::vector<std::pair<UniqueFile::Uid, DataItem>> data;
 	};
 
 public:
@@ -259,7 +265,7 @@ private: // HashParser::IObserver
 #undef HASH_PARSER_CALLBACK_ITEM
 			Util::HashParser::HashImageItem /*cover*/,
 		Util::HashParser::HashImageItems /*images*/,
-		Util::HashParser::Section::Ptr,
+		Util::HashParser::Section::Ptr section,
 		Util::TextHistogram,
 		QStringList
 	) override
@@ -272,7 +278,9 @@ private: // HashParser::IObserver
 		if (!originFolder.isEmpty())
 			m_parseStorage.replacement.emplace_back(std::make_pair(uid.folder, uid.file), std::make_pair(std::move(originFolder), std::move(originFile)));
 
-		m_parseStorage.data.emplace_back(std::move(uid), std::move(id));
+		const auto it = section->children.find(id);
+
+		m_parseStorage.data.emplace_back(std::move(uid), ParseStorage::DataItem { .uid = std::move(id), .size = it != section->children.end() ? it->second->size : 0 });
 
 		return true;
 	}
@@ -1209,8 +1217,8 @@ Replacement ReadHash(InpDataProvider& inpDataProvider, Archives& archives)
 		{
 			std::ranges::move(storageItem.replacement, std::inserter(replacement, replacement.end()));
 			inpDataProvider.SetSourceLib(storageItem.archive.get().sourceLib);
-			for (auto&& [uid, id] : storageItem.data)
-				inpDataProvider.SetFile(uid, std::move(id));
+			for (auto&& [uid, storageDataItem] : storageItem.data)
+				inpDataProvider.SetFile(uid, std::move(storageDataItem.uid), storageDataItem.size);
 			progress.Increment(1, QString("%1 (%2)").arg(QFileInfo(storageItem.archive.get().hashPath).fileName()).arg(storageItem.data.size()).toStdString());
 		}
 	}

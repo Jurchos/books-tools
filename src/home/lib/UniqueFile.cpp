@@ -165,6 +165,7 @@ struct HashParserObserver final : Util::HashParser::IObserver
 #undef HASH_PARSER_CALLBACK_ITEM
 		Util::HashParser::HashImageItem  cover;
 		Util::HashParser::HashImageItems images;
+		size_t                           size { 0 };
 	};
 
 	using Items = std::vector<Item>;
@@ -182,7 +183,7 @@ private:
 #undef HASH_PARSER_CALLBACK_ITEM
 			Util::HashParser::HashImageItem cover,
 		Util::HashParser::HashImageItems    images,
-		Util::HashParser::Section::Ptr,
+		Util::HashParser::Section::Ptr      section,
 		Util::TextHistogram,
 		QStringList
 	) override
@@ -190,13 +191,16 @@ private:
 		if (!originFolder.isEmpty())
 			return true;
 
+		const auto it = section->children.find(id);
+
 		assert(!data.empty());
 		data.back().second.emplace_back(
 #define HASH_PARSER_CALLBACK_ITEM(NAME) std::move(NAME),
 			HASH_PARSER_CALLBACK_ITEMS_X_MACRO
 #undef HASH_PARSER_CALLBACK_ITEM
 				std::move(cover),
-			std::move(images)
+			std::move(images),
+			it != section->children.end() ? it->second->size : 0
 		);
 		return true;
 	}
@@ -314,7 +318,7 @@ const std::vector<Book*>& InpDataProvider::Books() const noexcept
 	return m_books;
 }
 
-Book* InpDataProvider::SetFile(const UniqueFile::Uid& uid, QString id)
+Book* InpDataProvider::SetFile(const UniqueFile::Uid& uid, QString id, const size_t size)
 {
 	assert(m_currentInpData);
 	if (const auto it = m_currentInpData->find(uid.file); it != m_currentInpData->end())
@@ -323,6 +327,8 @@ Book* InpDataProvider::SetFile(const UniqueFile::Uid& uid, QString id)
 		auto& book   = m_data.try_emplace(QString("%1#%2").arg(uid.folder, uid.file), it->second).first->second;
 		book->id     = std::move(id);
 		book->folder = uid.folder;
+		if (size != 0)
+			book->size = QString::number(size);
 		return book.get();
 	}
 
@@ -385,7 +391,7 @@ UniqueFileStorage::UniqueFileStorage(QString dstDir, const int hammingThreshold,
 
 					const UniqueFile::Uid uid { observerItem.folder, observerItem.file };
 
-					if (const auto* book = m_inpDataProvider->SetFile(uid, observerItem.id))
+					if (const auto* book = m_inpDataProvider->SetFile(uid, observerItem.id, observerItem.size))
 						observerItem.title.append(" ").append(book->title);
 					Util::SimplifyTitle(Util::PrepareTitle(observerItem.title));
 					auto split = observerItem.title.split(' ', Qt::SkipEmptyParts);

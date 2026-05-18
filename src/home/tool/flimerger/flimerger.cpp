@@ -179,7 +179,7 @@ private:
 #undef HASH_PARSER_CALLBACK_ITEM
 			Util::HashParser::HashImageItem cover,
 		Util::HashParser::HashImageItems    images,
-		Util::HashParser::Section::Ptr,
+		Util::HashParser::Section::Ptr      section,
 		Util::TextHistogram,
 		QStringList
 	) override
@@ -197,8 +197,10 @@ private:
 		if (!m_bookFiles.contains(file))
 			return true;
 
+		const auto it = section->children.find(id);
+
 		UniqueFile::Uid uid { .folder = m_fileInfo.fileName(), .file = file };
-		if (const auto* book = m_inpDataProvider.SetFile(uid, id))
+		if (const auto* book = m_inpDataProvider.SetFile(uid, id, it != section->children.end() ? it->second->size : 0))
 			title.append(" ").append(book->title);
 		Util::SimplifyTitle(Util::PrepareTitle(title));
 		auto split = title.split(' ', Qt::SkipEmptyParts);
