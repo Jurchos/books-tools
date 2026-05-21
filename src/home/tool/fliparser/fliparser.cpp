@@ -32,6 +32,7 @@
 #include "util/Fb2InpxParser.h"
 #include "util/GenresLocalization.h"
 #include "util/LogConsoleFormatter.h"
+#include "util/bookhash/hashbook.h"
 #include "util/bookhash/hashparser.h"
 #include "util/executor/ThreadPool.h"
 #include "util/language.h"
@@ -541,14 +542,26 @@ std::optional<Book> ParseEpub(
 	const QFileInfo fileInfo(fileName);
 	try
 	{
-		auto parseResult = Util::EpubParser::Parse(zip, fileName);
+		static constexpr const char* textExt[] { ".htm", ".html", ".xhtml", ".xml" };
+		QCryptographicHash           md5 { QCryptographicHash::Md5 };
+		auto               parseResult = Parse(zip, fileName, Util::EpubParser::Mode::All);
+		size_t             size        = 0;
+		for (auto&& [id, body] : parseResult.texts | std::views::filter([](const auto& item) {
+									 return std::ranges::any_of(textExt, [&](const char* ext) {
+										 return item.id.endsWith(ext, Qt::CaseInsensitive);
+									 });
+								 }))
+		{
+			auto hist  = Util::CollectHistogram(std::move(body), md5);
+			size      += Util::CalculateHash(hist).size;
+		}
 		Book book {
 			.author  = authorsToString(std::move(parseResult.authors)),
 			.genre   = genresToString(parseResult.genres),
 			.title   = std::move(parseResult.title),
 			.series  = { {} },
 			.file    = fileInfo.completeBaseName(),
-			.size    = QString::number(zip.GetFileSize(fileName)),
+			.size    = QString::number(size),
 			.libId   = fileInfo.completeBaseName(),
 			.deleted = isDeleted,
 			.ext     = fileInfo.suffix(),
@@ -767,6 +780,7 @@ void CreateInpx(const Settings& settings, const Archives& archives, InpDataProvi
 
 			book->sourceLib = sourceLib;
 			book->folder    = folder;
+			book->file      = QFileInfo(bookFile).completeBaseName();
 
 			const auto dashIt = [](QString& title) {
 				std::ranges::transform(title, title.begin(), [](const QChar ch) {
