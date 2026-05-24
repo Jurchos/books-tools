@@ -1,12 +1,11 @@
-﻿#include <QCryptographicHash>
-
-#include <filesystem>
+﻿#include <filesystem>
 #include <ranges>
 #include <regex>
 #include <set>
 
 #include <QBuffer>
 #include <QCommandLineParser>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>

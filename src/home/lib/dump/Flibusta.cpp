@@ -1,9 +1,8 @@
-﻿#include <QCryptographicHash>
-
-#include <ranges>
+﻿#include <ranges>
 #include <set>
 
 #include <QBuffer>
+#include <QCryptographicHash>
 #include <QFileInfo>
 
 #include "fnd/ScopedCall.h"

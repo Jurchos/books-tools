@@ -1,11 +1,10 @@
 ﻿#pragma once
 
-#include <QHash>
-
 #include <memory>
 #include <unordered_map>
 #include <vector>
 
+#include <QHash>
 #include <QString>
 
 #include "export/lib.h"

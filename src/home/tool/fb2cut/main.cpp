@@ -1,5 +1,3 @@
-#include <QCryptographicHash>
-
 #include <condition_variable>
 #include <expected>
 #include <queue>
@@ -7,6 +5,7 @@
 
 #include <QBuffer>
 #include <QCommandLineParser>
+#include <QCryptographicHash>
 #include <QDirIterator>
 #include <QGuiApplication>
 #include <QImageReader>

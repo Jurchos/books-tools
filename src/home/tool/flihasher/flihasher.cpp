@@ -1,10 +1,9 @@
-﻿#include <QCryptographicHash>
-
-#include <condition_variable>
+﻿#include <condition_variable>
 #include <queue>
 #include <thread>
 
 #include <QCommandLineParser>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QGuiApplication>
 #include <QStandardPaths>

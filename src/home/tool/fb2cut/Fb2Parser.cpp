@@ -1,10 +1,9 @@
-#include <QCryptographicHash>
-
 #include <set>
 #include <stack>
 #include <unordered_set>
 
 #include <QBuffer>
+#include <QCryptographicHash>
 #include <QFileInfo>
 #include <QIODevice>
 #include <QRegularExpression>
