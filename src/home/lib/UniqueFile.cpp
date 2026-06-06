@@ -263,6 +263,11 @@ Book* InpDataProvider::GetBook(const UniqueFile::Uid& uid) const
 	if (const auto it = m_currentInpData->find(uid.file); it != m_currentInpData->end())
 		return it->second.get();
 
+	auto file = uid.file;
+	for (auto baseFile = QFileInfo(file).completeBaseName(); baseFile != file; file = baseFile)
+		if (const auto it = m_currentInpData->find(baseFile); it != m_currentInpData->end())
+			return it->second.get();
+
 	return nullptr;
 }
 

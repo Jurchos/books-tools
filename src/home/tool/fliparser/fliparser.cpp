@@ -777,9 +777,12 @@ void CreateInpx(const Settings& settings, const Archives& archives, InpDataProvi
 				continue;
 			}
 
+			const QFileInfo bookFileInfo(bookFile);
+
 			book->sourceLib = sourceLib;
 			book->folder    = folder;
-			book->file      = QFileInfo(bookFile).completeBaseName();
+			book->file      = bookFileInfo.completeBaseName();
+			book->ext       = bookFileInfo.suffix();
 
 			const auto dashIt = [](QString& title) {
 				std::ranges::transform(title, title.begin(), [](const QChar ch) {
