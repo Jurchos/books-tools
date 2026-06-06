@@ -65,12 +65,23 @@ bool Parsable(const QString& fileName)
 	});
 }
 
+static constexpr std::string_view UTF[] {
+	"\xef\xbb\xbf", // UTF8
+	"\xff\xfe", // UTF16LE
+	"\xfe\xff", // UTF16BE
+};
+
 FoundParser FindParserCreator(QString inputFilePath, QByteArray inputFileBody, const IEncodingDetector& encodingDetector, const Decoder& decoder, const Util::XmlValidator& validator)
 {
 	inputFilePath = Platform::RemoveIllegalPathCharacters(std::move(inputFilePath));
 
 	const auto it = std::ranges::find_if(PARSERS, [&](const auto& item) {
-		return inputFileBody.startsWith(item.first);
+		const auto utfIt = std::ranges::find_if(UTF, [&](const auto utf) {
+			return inputFileBody.startsWith(utf);
+		});
+		const auto     utfWidth = utfIt == std::end(UTF) ? 0 : utfIt->size();
+		QByteArrayView inputFileBodyView(inputFileBody.data() + utfWidth, inputFileBody.size() - utfWidth);
+		return inputFileBodyView.startsWith(item.first);
 	});
 	if (it != std::end(PARSERS))
 	{
