@@ -380,8 +380,8 @@ private: // IDatabase
 	void CreateInpData(const std::function<void(const DB::IQuery&)>& functor) const override
 	{
 		const auto query = m_db->CreateQuery(R"(
-with Books(  BookId,         Title,   FileSize,   LibID,    Deleted,                                FileType,   Time,   Lang,   Keywords, Year,              LibRateSum , LibRateCount) as (
-    select b.BookId, trim(b.Title), b.FileSize, b.BookId, b.Deleted, coalesce(nullif(b.FileType, ''), 'fb2'), b.Time, b.Lang, b.keywords, nullif(b.Year, 0), sum(r.Rate), count(r.Rate)
+with Books(  BookId,         Title,   FileSize,   LibID,    Deleted,                                FileType,   Time,   Lang,   Keywords, Year,              Hash, LibRateSum , LibRateCount) as (
+    select b.BookId, trim(b.Title), b.FileSize, b.BookId, b.Deleted, coalesce(nullif(b.FileType, ''), 'fb2'), b.Time, b.Lang, b.keywords, nullif(b.Year, 0), md5 , sum(r.Rate), count(r.Rate)
         from libbook b
         left join librate r on r.BookID = b.BookId
         group by b.BookId
@@ -409,7 +409,7 @@ select
         join libgenre l on l.GenreId = g.GenreId and l.BookID = b.BookID 
         order by g.GenreID
     ) Genre,
-    b.Title, trim(s.SeqName), case when s.SeqId is null then null else ls.SeqNumb end, f.FileName, b.FileSize, b.LibID, b.Deleted, b.FileType, b.Time, b.Lang, b.LibRateSum, b.LibRateCount, b.keywords, b.Year, ls.Type, ls.Level
+    b.Title, trim(s.SeqName), case when s.SeqId is null then null else ls.SeqNumb end, f.FileName, b.FileSize, b.LibID, b.Deleted, b.FileType, b.Time, b.Lang, b.LibRateSum, b.LibRateCount, b.keywords, b.Year, b.Hash, ls.Type, ls.Level
 from Books b
 left join libseq ls on ls.BookID = b.BookID
 left join libseqname s on s.SeqID = ls.SeqID

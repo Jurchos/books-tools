@@ -683,6 +683,10 @@ std::optional<Book> ParseZip(
 Book* ParseBook(const QString& fileName, InpDataProvider& inpDataProvider, const QString& folder, const Zip& zip, const QDateTime& zipDateTime, const bool isDeleted)
 {
 	const auto hash = GetFileHash(zip, fileName).hash;
+
+	if (auto book = inpDataProvider.GetBook(hash))
+		return book;
+
 	PLOGV << "parse " << fileName << ", hash: " << hash;
 
 	const auto parser = [&] {

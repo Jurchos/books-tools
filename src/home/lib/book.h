@@ -41,6 +41,7 @@ struct Book
 	QString             year;
 	QString             sourceLib;
 	size_t              insNo { 0 };
+	QString             hash;
 
 	QString id;
 	QString folder;

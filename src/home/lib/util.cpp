@@ -119,12 +119,13 @@ InpData CreateInpData(const IDump& dump)
 							 .rateCount = query.Get<int>(13),
 							 .keywords  = query.Get<const char*>(14),
 							 .year      = query.Get<const char*>(15),
+							 .hash      = query.Get<const char*>(16),
 						 })
 					 )
 			         .first;
 		}
 
-		it->second->series.emplace_back(query.Get<const char*>(3), Util::Fb2InpxParser::GetSeqNumber(query.Get<const char*>(4)), query.Get<int>(16), query.Get<double>(17));
+		it->second->series.emplace_back(query.Get<const char*>(3), Util::Fb2InpxParser::GetSeqNumber(query.Get<const char*>(4)), query.Get<int>(17), query.Get<double>(18));
 
 		++n;
 		PLOGV_IF(n % 50000 == 0) << n << " records selected";

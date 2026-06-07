@@ -277,6 +277,12 @@ Book* InpDataProvider::GetBook(const QString& sourceLib, const QString& libId) c
 	return it != m_libIdToBook.end() ? it->second : nullptr;
 }
 
+Book* InpDataProvider::GetBook(const QString& hash) const
+{
+	const auto it = m_hashToBook.find(hash);
+	return it != m_hashToBook.end() ? it->second : nullptr;
+}
+
 void InpDataProvider::SetSourceLib(const QString& sourceLib)
 {
 	if (const auto it = std::ranges::find_if(
@@ -289,10 +295,17 @@ void InpDataProvider::SetSourceLib(const QString& sourceLib)
 	{
 		if (it->inpData.empty())
 			it->inpData = CreateInpData(*it->dump);
+
 		m_currentInpData = &it->inpData;
+
 		std::ranges::transform(*m_currentInpData | std::views::values, std::inserter(m_libIdToBook, m_libIdToBook.end()), [sourceLib = sourceLib.toLower()](const auto& item) {
 			return std::make_pair(QString("%1_%2").arg(sourceLib, item->libId), item.get());
 		});
+
+		std::ranges::transform(*m_currentInpData | std::views::values, std::inserter(m_hashToBook, m_hashToBook.end()), [](const auto& item) {
+			return std::make_pair(item->hash, item.get());
+		});
+
 		return;
 	}
 

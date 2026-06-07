@@ -196,8 +196,8 @@ private: // IDatabase
 	void CreateInpData(const std::function<void(const DB::IQuery&)>& functor) const override
 	{
 		const auto query = m_db->CreateQuery(R"(
-with Books(BookId,         Title,   FileSize, LibID,   Deleted,                                FileType,   Time,   Lang,   Keywords,              Year, LibRateSum , LibRateCount) as (
-    select  b.bid, trim(b.Title), b.FileSize, b.bid, b.Deleted, coalesce(nullif(b.FileType, ''), 'fb2'), b.Time, b.Lang, b.keywords, nullif(b.Year, 0), sum(r.Rate), count(r.Rate)
+with Books(BookId,         Title,   FileSize, LibID,   Deleted,                                FileType,   Time,   Lang,   Keywords,              Year, Hash , LibRateSum , LibRateCount) as (
+    select  b.bid, trim(b.Title), b.FileSize, b.bid, b.Deleted, coalesce(nullif(b.FileType, ''), 'fb2'), b.Time, b.Lang, b.keywords, nullif(b.Year, 0), b.md5, sum(r.Rate), count(r.Rate)
         from libbook b
         left join librate r on r.bid = b.bid
         group by b.bid
@@ -219,7 +219,7 @@ select
         join libgenre l on l.gid = g.gid and l.bid = b.BookID 
         order by g.gid
     ) Genre,
-    b.Title, trim(s.seqname), case when ls.sid is null then null else ls.sn end, null, b.FileSize, b.LibID, b.Deleted, b.FileType, b.Time, b.Lang, b.LibRateSum, b.LibRateCount, b.keywords, b.Year, 0, -ls.sort
+    b.Title, trim(s.seqname), case when ls.sid is null then null else ls.sn end, null, b.FileSize, b.LibID, b.Deleted, b.FileType, b.Time, b.Lang, b.LibRateSum, b.LibRateCount, b.keywords, b.Year, b.Hash, 0, -ls.sort
 from Books b
 left join libseq ls on ls.bid = b.BookID
 left join libseqs s on s.sid = ls.sid
